@@ -8,12 +8,13 @@ from __future__ import absolute_import, division, print_function
 
 import numpy as np
 import time
+from tqdm import tqdm
 
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from tensorboardX import SummaryWriter
+# from tensorboardX import SummaryWriter
 
 import json
 
@@ -116,10 +117,13 @@ class Trainer:
         self.dataset = datasets_dict[self.opt.dataset]
 
         fpath = os.path.join(os.path.dirname(__file__), "splits", self.opt.split, "{}_files.txt")
-
         train_filenames = readlines(fpath.format("train"))
         val_filenames = readlines(fpath.format("val"))
         img_ext = '.png' if self.opt.png else '.jpg'
+
+        # === DISSECTION ===
+        train_filenames = list(filter(lambda x: x.find('09_26_drive_0001') > -1, train_filenames))
+        val_filenames = list(filter(lambda x: x.find('09_26_drive_0001') > -1, val_filenames))
 
         num_train_samples = len(train_filenames)
         self.num_total_steps = num_train_samples // self.opt.batch_size * self.opt.num_epochs
@@ -127,6 +131,9 @@ class Trainer:
         train_dataset = self.dataset(
             self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 4, is_train=True, img_ext=img_ext)
+
+        oneitem = train_dataset.__getitem__(0)
+
         self.train_loader = DataLoader(
             train_dataset, self.opt.batch_size, True,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
@@ -139,8 +146,8 @@ class Trainer:
         self.val_iter = iter(self.val_loader)
 
         self.writers = {}
-        for mode in ["train", "val"]:
-            self.writers[mode] = SummaryWriter(os.path.join(self.log_path, mode))
+        # for mode in ["train", "val"]:
+            # self.writers[mode] = SummaryWriter(os.path.join(self.log_path, mode))
 
         if not self.opt.no_ssim:
             self.ssim = SSIM()
@@ -193,15 +200,17 @@ class Trainer:
     def run_epoch(self):
         """Run a single epoch of training and validation
         """
-        self.model_lr_scheduler.step()
+        # self.model_lr_scheduler.step()
 
         print("Training")
         self.set_train()
 
-        for batch_idx, inputs in enumerate(self.train_loader):
+        for batch_idx, inputs in enumerate(self.train_loader): # total=self.num_total_steps):
 
             before_op_time = time.time()
-
+            # TODO:
+            #  UserWarning: Default grid_sample and affine_grid behavior has changed to align_corners=False since 1.3.0.
+            #  Please specify align_corners=True if the old behavior is desired. See the documentation of grid_sample for details.
             outputs, losses = self.process_batch(inputs)
 
             self.model_optimizer.zero_grad()
@@ -214,16 +223,20 @@ class Trainer:
             early_phase = batch_idx % self.opt.log_frequency == 0 and self.step < 2000
             late_phase = self.step % 2000 == 0
 
+            self.log_time(batch_idx, duration, losses["loss"].cpu().data)
+
             if early_phase or late_phase:
                 self.log_time(batch_idx, duration, losses["loss"].cpu().data)
 
                 if "depth_gt" in inputs:
                     self.compute_depth_losses(inputs, outputs, losses)
 
-                self.log("train", inputs, outputs, losses)
+                # self.log("train", inputs, outputs, losses)
                 self.val()
 
             self.step += 1
+
+        self.model_lr_scheduler.step()
 
     def process_batch(self, inputs):
         """Pass a minibatch through the network and generate images and losses
@@ -322,10 +335,10 @@ class Trainer:
         """
         self.set_eval()
         try:
-            inputs = self.val_iter.next()
+            inputs = next(self.val_iter)
         except StopIteration:
             self.val_iter = iter(self.val_loader)
-            inputs = self.val_iter.next()
+            inputs = next(self.val_iter)
 
         with torch.no_grad():
             outputs, losses = self.process_batch(inputs)
@@ -333,7 +346,7 @@ class Trainer:
             if "depth_gt" in inputs:
                 self.compute_depth_losses(inputs, outputs, losses)
 
-            self.log("val", inputs, outputs, losses)
+            # self.log("val", inputs, outputs, losses)
             del inputs, outputs, losses
 
         self.set_train()

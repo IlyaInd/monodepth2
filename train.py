@@ -11,7 +11,10 @@ from options import MonodepthOptions
 
 options = MonodepthOptions()
 opts = options.parse()
-
+opts.no_cuda = True
+opts.num_workers = 2
+opts.png = True
+opts.num_epochs = 5
 
 if __name__ == "__main__":
     trainer = Trainer(opts)
