@@ -67,22 +67,26 @@ def evaluate(opt):
 
     if opt.ext_disp_to_eval is None:
 
-        opt.load_weights_folder = os.path.expanduser(opt.load_weights_folder)
+        # opt.load_weights_folder = os.path.expanduser(opt.load_weights_folder)
 
         assert os.path.isdir(opt.load_weights_folder), \
             "Cannot find a folder at {}".format(opt.load_weights_folder)
 
         print("-> Loading weights from {}".format(opt.load_weights_folder))
 
-        filenames = readlines(os.path.join(splits_dir, opt.eval_split, "test_files.txt"))
+        #filenames = readlines(os.path.join(splits_dir, opt.eval_split, "test_files.txt"))
+        filenames = readlines(os.path.join(splits_dir, opts.split, "val_files.txt"))
+        filenames = list(filter(lambda x: x.find('09_26_drive_0001') > -1, filenames))
         encoder_path = os.path.join(opt.load_weights_folder, "encoder.pth")
         decoder_path = os.path.join(opt.load_weights_folder, "depth.pth")
 
         encoder_dict = torch.load(encoder_path)
 
+        img_ext = '.png' if opts.png else '.jpg'
+
         dataset = datasets.KITTIRAWDataset(opt.data_path, filenames,
                                            encoder_dict['height'], encoder_dict['width'],
-                                           [0], 4, is_train=False)
+                                           [0], 4, is_train=False, img_ext=img_ext)
         dataloader = DataLoader(dataset, 16, shuffle=False, num_workers=opt.num_workers,
                                 pin_memory=True, drop_last=False)
 
@@ -93,9 +97,14 @@ def evaluate(opt):
         encoder.load_state_dict({k: v for k, v in encoder_dict.items() if k in model_dict})
         depth_decoder.load_state_dict(torch.load(decoder_path))
 
-        encoder.cuda()
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+        else:
+            device = torch.device("cpu")
+
+        encoder.to(device)
+        depth_decoder.to(device)
         encoder.eval()
-        depth_decoder.cuda()
         depth_decoder.eval()
 
         pred_disps = []
@@ -105,7 +114,7 @@ def evaluate(opt):
 
         with torch.no_grad():
             for data in dataloader:
-                input_color = data[("color", 0, 0)].cuda()
+                input_color = data[("color", 0, 0)].to(device)
 
                 if opt.post_process:
                     # Post-processed results require each image to have two forward passes
@@ -187,7 +196,7 @@ def evaluate(opt):
         pred_disp = cv2.resize(pred_disp, (gt_width, gt_height))
         pred_depth = 1 / pred_disp
 
-        if opt.eval_split == "eigen":
+        if opt.eval_split == "eigen" or opt.eval_split == 'eigen_zhou':  # DISSECT
             mask = np.logical_and(gt_depth > MIN_DEPTH, gt_depth < MAX_DEPTH)
 
             crop = np.array([0.40810811 * gt_height, 0.99189189 * gt_height,
@@ -227,4 +236,12 @@ def evaluate(opt):
 
 if __name__ == "__main__":
     options = MonodepthOptions()
-    evaluate(options.parse())
+    opts = options.parse()
+    opts.no_cuda = True
+    opts.num_workers = 2
+    opts.png = True
+    opts.log_dir = '/Users/ilya/Документы/Учеба/Диплом/code/monodepth2/logs'
+    opts.load_weights_folder = '/Users/ilya/Документы/Учеба/Диплом/code/monodepth2/logs/models/weights_0'
+    opts.eval_mono = True
+    opts.eval_split = 'eigen_zhou'
+    evaluate(opts)

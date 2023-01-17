@@ -14,7 +14,8 @@ opts = options.parse()
 opts.no_cuda = True
 opts.num_workers = 2
 opts.png = True
-opts.num_epochs = 5
+opts.num_epochs = 1
+opts.log_dir = '/Users/ilya/Документы/Учеба/Диплом/code/monodepth2/logs'
 
 if __name__ == "__main__":
     trainer = Trainer(opts)
