@@ -6,12 +6,8 @@
 
 from __future__ import absolute_import, division, print_function
 
-import numpy as np
 import time
-from tqdm import tqdm
 
-import torch
-import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 # from tensorboardX import SummaryWriter
@@ -19,12 +15,11 @@ from torch.utils.data import DataLoader
 import json
 
 from utils import *
-from kitti_utils import *
+from datasets.kitti_utils import *
 from layers import *
 
 import datasets
 import networks
-from IPython import embed
 
 
 class Trainer:
@@ -113,7 +108,8 @@ class Trainer:
 
         # data
         datasets_dict = {"kitti": datasets.KITTIRAWDataset,
-                         "kitti_odom": datasets.KITTIOdomDataset}
+                         "kitti_odom": datasets.KITTIOdomDataset,
+                         "kitti_depth": datasets.KITTIDepthDataset}
         self.dataset = datasets_dict[self.opt.dataset]
 
         fpath = os.path.join(os.path.dirname(__file__), "splits", self.opt.split, "{}_files.txt")
@@ -205,7 +201,7 @@ class Trainer:
         print("Training")
         self.set_train()
 
-        for batch_idx, inputs in enumerate(self.train_loader): # total=self.num_total_steps):
+        for batch_idx, inputs in enumerate(self.train_loader):  # total=self.num_total_steps):
 
             before_op_time = time.time()
             # TODO:

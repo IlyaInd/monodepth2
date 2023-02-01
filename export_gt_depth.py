@@ -13,7 +13,7 @@ import numpy as np
 import PIL.Image as pil
 
 from utils import readlines
-from kitti_utils import generate_depth_map
+from datasets.kitti_utils import generate_depth_map
 
 
 def export_gt_depths_kitti():

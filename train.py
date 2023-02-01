@@ -16,6 +16,10 @@ opts.num_workers = 2
 opts.png = True
 opts.num_epochs = 1
 opts.log_dir = '/Users/ilya/Документы/Учеба/Диплом/code/monodepth2/logs'
+# opts.dataset = 'kitti_depth'
+
+# структура файлов глубин
+# depth_path = '/kitti_data/2011_09_26/2011_09_26_drive_0001_sync/proj_depth/groundtruth/image_03/0000000077.png'
 
 if __name__ == "__main__":
     trainer = Trainer(opts)
