@@ -74,9 +74,7 @@ def evaluate(opt):
 
         print("-> Loading weights from {}".format(opt.load_weights_folder))
 
-        #filenames = readlines(os.path.join(splits_dir, opt.eval_split, "test_files.txt"))
-        filenames = readlines(os.path.join(splits_dir, opts.split, "val_files.txt"))
-        filenames = list(filter(lambda x: x.find('09_26_drive_0001') > -1, filenames))
+        filenames = readlines(os.path.join(splits_dir, opt.eval_split, "test_files.txt"))
         encoder_path = os.path.join(opt.load_weights_folder, "encoder.pth")
         decoder_path = os.path.join(opt.load_weights_folder, "depth.pth")
 
@@ -196,7 +194,7 @@ def evaluate(opt):
         pred_disp = cv2.resize(pred_disp, (gt_width, gt_height))
         pred_depth = 1 / pred_disp
 
-        if opt.eval_split == "eigen" or opt.eval_split == 'eigen_zhou':  # DISSECT
+        if opt.eval_split == "eigen":
             mask = np.logical_and(gt_depth > MIN_DEPTH, gt_depth < MAX_DEPTH)
 
             crop = np.array([0.40810811 * gt_height, 0.99189189 * gt_height,
@@ -237,11 +235,11 @@ def evaluate(opt):
 if __name__ == "__main__":
     options = MonodepthOptions()
     opts = options.parse()
-    opts.no_cuda = True
-    opts.num_workers = 2
-    opts.png = True
-    opts.log_dir = '/Users/ilya/Документы/Учеба/Диплом/code/monodepth2/logs'
-    opts.load_weights_folder = '/Users/ilya/Документы/Учеба/Диплом/code/monodepth2/logs/models/weights_0'
+    opts.no_cuda = False
+    opts.num_workers = 4
+    # opts.png = True
+    opts.log_dir = 'logs'
+    opts.load_weights_folder = 'logs/models/weights_0'
     opts.eval_mono = True
-    opts.eval_split = 'eigen_zhou'
+    opts.eval_split = 'eigen'
     evaluate(opts)

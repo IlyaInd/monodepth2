@@ -113,13 +113,10 @@ class Trainer:
         self.dataset = datasets_dict[self.opt.dataset]
 
         fpath = os.path.join(os.path.dirname(__file__), "splits", self.opt.split, "{}_files.txt")
+
         train_filenames = readlines(fpath.format("train"))
         val_filenames = readlines(fpath.format("val"))
         img_ext = '.png' if self.opt.png else '.jpg'
-
-        # === DISSECTION ===
-        train_filenames = list(filter(lambda x: x.find('09_26_drive_0001') > -1, train_filenames))
-        val_filenames = list(filter(lambda x: x.find('09_26_drive_0001') > -1, val_filenames))
 
         num_train_samples = len(train_filenames)
         self.num_total_steps = num_train_samples // self.opt.batch_size * self.opt.num_epochs
@@ -127,9 +124,6 @@ class Trainer:
         train_dataset = self.dataset(
             self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 4, is_train=True, img_ext=img_ext)
-
-        oneitem = train_dataset.__getitem__(0)
-
         self.train_loader = DataLoader(
             train_dataset, self.opt.batch_size, True,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
@@ -201,12 +195,9 @@ class Trainer:
         print("Training")
         self.set_train()
 
-        for batch_idx, inputs in enumerate(self.train_loader):  # total=self.num_total_steps):
+        for batch_idx, inputs in enumerate(self.train_loader):
 
             before_op_time = time.time()
-            # TODO:
-            #  UserWarning: Default grid_sample and affine_grid behavior has changed to align_corners=False since 1.3.0.
-            #  Please specify align_corners=True if the old behavior is desired. See the documentation of grid_sample for details.
             outputs, losses = self.process_batch(inputs)
 
             self.model_optimizer.zero_grad()
@@ -219,6 +210,7 @@ class Trainer:
             early_phase = batch_idx % self.opt.log_frequency == 0 and self.step < 2000
             late_phase = self.step % 2000 == 0
 
+            # Logging without early phases
             self.log_time(batch_idx, duration, losses["loss"].cpu().data)
 
             if early_phase or late_phase:
@@ -393,7 +385,7 @@ class Trainer:
                 outputs[("color", frame_id, scale)] = F.grid_sample(
                     inputs[("color", frame_id, source_scale)],
                     outputs[("sample", frame_id, scale)],
-                    padding_mode="border")
+                    padding_mode="border", align_corners=True)
 
                 if not self.opt.disable_automasking:
                     outputs[("color_identity", frame_id, scale)] = \
