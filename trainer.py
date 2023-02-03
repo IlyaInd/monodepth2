@@ -11,6 +11,7 @@ import time
 import torch.optim as optim
 from torch.utils.data import DataLoader
 # from tensorboardX import SummaryWriter
+import wandb
 
 import json
 
@@ -139,6 +140,8 @@ class Trainer:
         # for mode in ["train", "val"]:
             # self.writers[mode] = SummaryWriter(os.path.join(self.log_path, mode))
 
+        wandb.init(project="diploma", entity="ilyaind", reinit=True)
+
         if not self.opt.no_ssim:
             self.ssim = SSIM()
             self.ssim.to(self.device)
@@ -210,9 +213,6 @@ class Trainer:
             early_phase = batch_idx % self.opt.log_frequency == 0 and self.step < 2000
             late_phase = self.step % 2000 == 0
 
-            # Logging without early phases
-            self.log_time(batch_idx, duration, losses["loss"].cpu().data)
-
             if early_phase or late_phase:
                 self.log_time(batch_idx, duration, losses["loss"].cpu().data)
 
@@ -220,6 +220,7 @@ class Trainer:
                     self.compute_depth_losses(inputs, outputs, losses)
 
                 # self.log("train", inputs, outputs, losses)
+                wandb.log({'train_' + key: val for key, val in losses.items()}, step=self.step)
                 self.val()
 
             self.step += 1
@@ -335,6 +336,7 @@ class Trainer:
                 self.compute_depth_losses(inputs, outputs, losses)
 
             # self.log("val", inputs, outputs, losses)
+            wandb.log({'val_' + key: val for key, val in losses.items()}, step=self.step)
             del inputs, outputs, losses
 
         self.set_train()
