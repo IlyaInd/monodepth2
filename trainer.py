@@ -11,6 +11,7 @@ import time
 import torch.optim as optim
 from torch.utils.data import DataLoader
 # from tensorboardX import SummaryWriter
+import wandb
 
 import json
 
@@ -145,6 +146,8 @@ class Trainer:
         # for mode in ["train", "val"]:
             # self.writers[mode] = SummaryWriter(os.path.join(self.log_path, mode))
 
+        wandb.init(project="diploma", entity="ilyaind", reinit=False)
+
         if not self.opt.no_ssim:
             self.ssim = SSIM()
             self.ssim.to(self.device)
@@ -204,9 +207,6 @@ class Trainer:
         for batch_idx, inputs in enumerate(self.train_loader):  # total=self.num_total_steps):
 
             before_op_time = time.time()
-            # TODO:
-            #  UserWarning: Default grid_sample and affine_grid behavior has changed to align_corners=False since 1.3.0.
-            #  Please specify align_corners=True if the old behavior is desired. See the documentation of grid_sample for details.
             outputs, losses = self.process_batch(inputs)
 
             self.model_optimizer.zero_grad()
@@ -219,8 +219,6 @@ class Trainer:
             early_phase = batch_idx % self.opt.log_frequency == 0 and self.step < 2000
             late_phase = self.step % 2000 == 0
 
-            self.log_time(batch_idx, duration, losses["loss"].cpu().data)
-
             if early_phase or late_phase:
                 self.log_time(batch_idx, duration, losses["loss"].cpu().data)
 
@@ -228,6 +226,7 @@ class Trainer:
                     self.compute_depth_losses(inputs, outputs, losses)
 
                 # self.log("train", inputs, outputs, losses)
+                wandb.log({'train_' + key: val for key, val in losses.items()}, step=self.step)
                 self.val()
 
             self.step += 1
@@ -343,6 +342,7 @@ class Trainer:
                 self.compute_depth_losses(inputs, outputs, losses)
 
             # self.log("val", inputs, outputs, losses)
+            wandb.log({'val_' + key: val for key, val in losses.items()}, step=self.step)
             del inputs, outputs, losses
 
         self.set_train()
@@ -393,7 +393,7 @@ class Trainer:
                 outputs[("color", frame_id, scale)] = F.grid_sample(
                     inputs[("color", frame_id, source_scale)],
                     outputs[("sample", frame_id, scale)],
-                    padding_mode="border")
+                    padding_mode="border", align_corners=True)
 
                 if not self.opt.disable_automasking:
                     outputs[("color_identity", frame_id, scale)] = \
