@@ -5,18 +5,15 @@
 # available in the LICENSE file.
 
 from __future__ import absolute_import, division, print_function
+import warnings
+warnings.filterwarnings('ignore', module='mmcv')
 
 from trainer import Trainer
 from options import MonodepthOptions
 
 options = MonodepthOptions()
 opts = options.parse()
-opts.no_cuda = False
-opts.num_workers = 4
-# opts.png = False
-opts.num_epochs = 20
 opts.log_dir = 'logs'
-# opts.dataset = 'kitti_depth'
 
 
 if __name__ == "__main__":

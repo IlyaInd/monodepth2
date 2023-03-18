@@ -13,6 +13,8 @@ from torch.utils.data import DataLoader
 # from tensorboardX import SummaryWriter
 import wandb
 
+from mmcv.cnn.utils import revert_sync_batchnorm
+
 import json
 
 from utils import *
@@ -48,8 +50,12 @@ class Trainer:
         if self.opt.use_stereo:
             self.opt.frame_ids.append("s")
 
-        self.models["encoder"] = networks.ResnetEncoder(
-            self.opt.num_layers, self.opt.weights_init == "pretrained")
+        # self.models["encoder"] = networks.ResnetEncoder(
+        #     self.opt.num_layers, self.opt.weights_init == "pretrained")
+        van = networks.resnet_encoder.VAN()
+        if self.device == 'cpu':
+            van = revert_sync_batchnorm(van)
+        self.models["encoder"] = networks.resnet_encoder.VAN_encoder(van)
         self.models["encoder"].to(self.device)
         self.parameters_to_train += list(self.models["encoder"].parameters())
 
@@ -210,8 +216,8 @@ class Trainer:
             duration = time.time() - before_op_time
 
             # log less frequently after the first 2000 steps to save time & disk space
-            early_phase = batch_idx % self.opt.log_frequency == 0 and self.step < 2000
-            late_phase = self.step % 2000 == 0
+            early_phase = self.step % self.opt.log_frequency == 0 and self.step <= self.num_total_steps // 10
+            late_phase = self.step % (self.opt.log_frequency * 5) == 0 and self.step > self.num_total_steps // 10
 
             if early_phase or late_phase:
                 self.log_time(batch_idx, duration, losses["loss"].cpu().data)
