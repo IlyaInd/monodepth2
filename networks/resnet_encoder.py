@@ -13,6 +13,8 @@ import torch.nn as nn
 import torchvision.models as models
 import torch.utils.model_zoo as model_zoo
 
+from .van import VAN
+
 
 class ResNetMultiImageInput(models.ResNet):
     """Constructs a resnet model with varying number of input images.
@@ -96,3 +98,21 @@ class ResnetEncoder(nn.Module):
         self.features.append(self.encoder.layer4(self.features[-1]))
 
         return self.features
+
+
+class VAN_encoder(nn.Module):
+    def __init__(self, van):
+        super().__init__()
+        self.num_ch_enc = np.array([64, 64, 128, 256, 512])
+        self.conv_stem = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=(3,3), stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.Conv2d(64, 64, kernel_size=(3,3), padding=1)
+        )
+        self.van = van
+
+    def forward(self, x):
+        out = [self.conv_stem(x)]
+        van_out = self.van(x)
+        out.extend(van_out)
+        return out

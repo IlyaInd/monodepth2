@@ -5,6 +5,8 @@
 # available in the LICENSE file.
 
 from __future__ import absolute_import, division, print_function
+import warnings
+warnings.filterwarnings('ignore', module='mmcv')
 
 from trainer import Trainer
 from options import MonodepthOptions
