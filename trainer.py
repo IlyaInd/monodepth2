@@ -52,7 +52,8 @@ class Trainer:
 
         # self.models["encoder"] = networks.ResnetEncoder(
         #     self.opt.num_layers, self.opt.weights_init == "pretrained")
-        van = networks.resnet_encoder.VAN()
+        van = networks.resnet_encoder.VAN(embed_dims=[64, 128, 320, 512],
+                                          mlp_ratios=[8, 8, 4, 4], depths=[3, 3, 12, 3])
         if self.device == 'cpu':
             van = revert_sync_batchnorm(van)
         self.models["encoder"] = networks.resnet_encoder.VAN_encoder(van)

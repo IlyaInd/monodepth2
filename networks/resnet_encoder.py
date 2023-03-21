@@ -12,9 +12,10 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 import torch.utils.model_zoo as model_zoo
+from timm.models.vision_transformer import _cfg
+from mmcv.cnn.utils import revert_sync_batchnorm
 
 from .van import VAN
-
 
 class ResNetMultiImageInput(models.ResNet):
     """Constructs a resnet model with varying number of input images.
@@ -100,18 +101,38 @@ class ResnetEncoder(nn.Module):
         return self.features
 
 
+def load_weights(model, weights_path):
+    model.default_cfg = _cfg()
+    if torch.cuda.is_available():
+        device = 'cuda'
+    else:
+        device = 'cpu'
+    checkpoint = torch.load(weights_path, map_location=torch.device(device))
+    strict = True
+    if not hasattr(model, 'num_classes') or model.num_classes != 1000:
+        strict = False
+        del checkpoint["state_dict"]["head.weight"]
+        del checkpoint["state_dict"]["head.bias"]
+    model.load_state_dict(checkpoint["state_dict"], strict=strict)
+    if device == 'cpu':
+        model = revert_sync_batchnorm(model)
+    return model
+
 class VAN_encoder(nn.Module):
     def __init__(self, van):
         super().__init__()
-        self.num_ch_enc = np.array([64, 64, 128, 256, 512])
+        self.imagenet_mean = torch.Tensor([0.485, 0.456, 0.406])
+        self.imagenet_std = torch.Tensor([0.229, 0.224, 0.225])
+        self.num_ch_enc = np.array([64, 64, 128, 320, 512])
         self.conv_stem = nn.Sequential(
             nn.Conv2d(3, 64, kernel_size=(3,3), stride=2, padding=1),
             nn.BatchNorm2d(64),
             nn.Conv2d(64, 64, kernel_size=(3,3), padding=1)
         )
-        self.van = van
+        self.van = load_weights(van, 'networks/van_base_828.pth.tar')
 
     def forward(self, x):
+        x = (x - self.imagenet_mean[None, :, None, None]) / self.imagenet_std[None, :, None, None]
         out = [self.conv_stem(x)]
         van_out = self.van(x)
         out.extend(van_out)
