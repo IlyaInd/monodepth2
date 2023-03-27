@@ -121,6 +121,23 @@ def load_weights(model, weights_path):
     gc.collect()
     return model
 
+
+class MultiHeadAttentionBlock(nn.Module):
+    def __init__(self, dim, width, height, nhead):
+        super().__init__()
+        self.dim = dim
+        self.width = width
+        self.height = height
+        self.attention = torch.nn.TransformerEncoderLayer(d_model=dim, nhead=nhead, dropout=0,
+                                                          activation='gelu', batch_first=True)
+
+    def forward(self, x):
+        # [bs, c, w, h]
+        x = x.flatten(2).permute(0, 2, 1) # [bs, n, c]
+        x = self.attention(x)
+        return x.permute(0, 2, 1).view(-1, self.dim, self.width, self.height)
+
+
 class VAN_encoder(nn.Module):
     def __init__(self, van):
         super().__init__()
@@ -133,10 +150,12 @@ class VAN_encoder(nn.Module):
             nn.Conv2d(64, 64, kernel_size=(3,3), padding=1)
         )
         self.van = load_weights(van, 'networks/van_base_828.pth.tar')
+        self.mhe_block = MultiHeadAttentionBlock(self.num_ch_enc[-1], 6, 20, nhead=8)
 
     def forward(self, x):
         x = (x - self.imagenet_mean[None, :, None, None]) / self.imagenet_std[None, :, None, None]
         out = [self.conv_stem(x)]
         van_out = self.van(x)
         out.extend(van_out)
+        out[-1] = self.mhe_block(out[-1])
         return out
