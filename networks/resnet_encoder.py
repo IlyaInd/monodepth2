@@ -7,6 +7,7 @@
 from __future__ import absolute_import, division, print_function
 
 import numpy as np
+import gc
 
 import torch
 import torch.nn as nn
@@ -16,9 +17,6 @@ from timm.models.vision_transformer import _cfg
 from mmcv.cnn.utils import revert_sync_batchnorm
 
 from .van import VAN
-
-IMAGENET_MEAN = torch.Tensor([0.485, 0.456, 0.406])
-IMAGENET_STD = torch.Tensor([0.229, 0.224, 0.225])
 
 class ResNetMultiImageInput(models.ResNet):
     """Constructs a resnet model with varying number of input images.
@@ -119,11 +117,15 @@ def load_weights(model, weights_path):
     model.load_state_dict(checkpoint["state_dict"], strict=strict)
     if device == 'cpu':
         model = revert_sync_batchnorm(model)
+    del checkpoint
+    gc.collect()
     return model
 
 class VAN_encoder(nn.Module):
     def __init__(self, van):
         super().__init__()
+        self.register_buffer('imagenet_mean', torch.Tensor([0.485, 0.456, 0.406]))
+        self.register_buffer('imagenet_std', torch.Tensor([0.229, 0.224, 0.225]))
         self.num_ch_enc = np.array([64, 64, 128, 320, 512])
         self.conv_stem = nn.Sequential(
             nn.Conv2d(3, 64, kernel_size=(3,3), stride=2, padding=1),
@@ -133,7 +135,7 @@ class VAN_encoder(nn.Module):
         self.van = load_weights(van, 'networks/van_base_828.pth.tar')
 
     def forward(self, x):
-        x = (x - IMAGENET_MEAN[None, :, None, None]) / IMAGENET_STD[None, :, None, None]
+        x = (x - self.imagenet_mean[None, :, None, None]) / self.imagenet_std[None, :, None, None]
         out = [self.conv_stem(x)]
         van_out = self.van(x)
         out.extend(van_out)

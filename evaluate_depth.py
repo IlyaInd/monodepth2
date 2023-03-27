@@ -6,6 +6,7 @@ import numpy as np
 
 import torch
 from torch.utils.data import DataLoader
+import wandb
 
 from layers import disp_to_depth
 from utils import readlines
@@ -90,17 +91,20 @@ def evaluate(opt):
         dataloader = DataLoader(dataset, 16, shuffle=False, num_workers=opt.num_workers,
                                 pin_memory=True, drop_last=False)
 
-        encoder = networks.ResnetEncoder(opt.num_layers, False)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # encoder = networks.ResnetEncoder(opt.num_layers, False)
+        # TODO: спрять этот пиздец в файл конфигурации энкодера
+        van = networks.resnet_encoder.VAN(embed_dims=[64, 128, 320, 512],
+                                          mlp_ratios=[8, 8, 4, 4], depths=[3, 3, 12, 3])
+        encoder = networks.resnet_encoder.VAN_encoder(van)
+
         depth_decoder = networks.DepthDecoder(encoder.num_ch_enc)
 
+        # TODO: препарировать этот участок. Зачем нужна подгрузка весов еще раз? Или это другое?
         model_dict = encoder.state_dict()
         encoder.load_state_dict({k: v for k, v in encoder_dict.items() if k in model_dict})
         depth_decoder.load_state_dict(torch.load(decoder_path))
-
-        if torch.cuda.is_available():
-            device = torch.device("cuda")
-        else:
-            device = torch.device("cpu")
 
         encoder.to(device)
         depth_decoder.to(device)
@@ -228,6 +232,16 @@ def evaluate(opt):
         print(" Scaling ratios | med: {:0.3f} | std: {:0.3f}".format(med, np.std(ratios / med)))
 
     mean_errors = np.array(errors).mean(0)
+
+    latest_run_id = list(filter(lambda x: x[-6:] == '.wandb', os.listdir('wandb/latest-run')))[0][4:-6]
+    print(f'Use latest wandb run to log summary: {latest_run_id}')
+    api = wandb.Api()
+    run = api.run(f"ilyaind/diploma/{latest_run_id}")
+    for k, v in zip(["abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"], mean_errors):
+        run.summary[f'test/{k}'] = v
+    run.summary.update()
+    run.update()
+    run.save()
 
     print("\n  " + ("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
     print(("&{: 8.3f}  " * 7).format(*mean_errors.tolist()) + "\\\\")
