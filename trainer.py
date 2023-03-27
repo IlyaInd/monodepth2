@@ -54,15 +54,16 @@ class Trainer:
         #     self.opt.num_layers, self.opt.weights_init == "pretrained")
         van = networks.resnet_encoder.VAN(embed_dims=[64, 128, 320, 512],
                                           mlp_ratios=[8, 8, 4, 4], depths=[3, 3, 12, 3])
-        if self.device == 'cpu':
-            van = revert_sync_batchnorm(van)
+        print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')        
         self.models["encoder"] = networks.resnet_encoder.VAN_encoder(van)
         self.models["encoder"].to(self.device)
+        print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
         self.parameters_to_train += list(self.models["encoder"].parameters())
 
         self.models["depth"] = networks.DepthDecoder(
             self.models["encoder"].num_ch_enc, self.opt.scales)
         self.models["depth"].to(self.device)
+        print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
         self.parameters_to_train += list(self.models["depth"].parameters())
 
         if self.use_pose_net:
@@ -89,6 +90,7 @@ class Trainer:
                     self.num_input_frames if self.opt.pose_model_input == "all" else 2)
 
             self.models["pose"].to(self.device)
+            print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
             self.parameters_to_train += list(self.models["pose"].parameters())
 
         if self.opt.predictive_mask:
@@ -142,10 +144,10 @@ class Trainer:
             val_dataset, self.opt.batch_size, True,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         self.val_iter = iter(self.val_loader)
-
-        self.writers = {}
-        # for mode in ["train", "val"]:
-            # self.writers[mode] = SummaryWriter(os.path.join(self.log_path, mode))
+        #self.model_lr_scheduler = optim.lr_scheduler.OneCycleLR(self.model_optimizer,
+        #                                                        max_lr=3e-4, anneal_strategy='cos',
+        #                                                        total_steps=self.num_total_steps, pct_start=0.05,
+        #                                                        div_factor=100, final_div_factor=0.1, verbose=False)
 
         wandb.init(project="diploma", entity="ilyaind", reinit=True)
 
@@ -229,6 +231,9 @@ class Trainer:
                 # self.log("train", inputs, outputs, losses)
                 wandb.log({'train_' + key: val for key, val in losses.items()}, step=self.step)
                 self.val()
+            
+            wandb.log({'learning_rate': self.model_lr_scheduler.get_last_lr()[0]}, step=self.step)
+            #self.model_lr_scheduler.step()
 
             self.step += 1
 

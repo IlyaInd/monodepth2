@@ -6,6 +6,7 @@ import numpy as np
 
 import torch
 from torch.utils.data import DataLoader
+import wandb
 
 from layers import disp_to_depth
 from utils import readlines
@@ -88,17 +89,24 @@ def evaluate(opt):
         dataloader = DataLoader(dataset, 16, shuffle=False, num_workers=opt.num_workers,
                                 pin_memory=True, drop_last=False)
 
-        encoder = networks.ResnetEncoder(opt.num_layers, False)
-        depth_decoder = networks.DepthDecoder(encoder.num_ch_enc)
-
-        model_dict = encoder.state_dict()
-        encoder.load_state_dict({k: v for k, v in encoder_dict.items() if k in model_dict})
-        depth_decoder.load_state_dict(torch.load(decoder_path))
-
+        #encoder = networks.ResnetEncoder(opt.num_layers, False)
+        
         if torch.cuda.is_available():
             device = torch.device("cuda")
         else:
             device = torch.device("cpu")
+        
+        # encoder = networks.ResnetEncoder(opt.num_layers, False)
+        # TODO: спрять этот пиздец в файл конфигурации энкодера
+        van = networks.resnet_encoder.VAN(embed_dims=[64, 128, 320, 512],
+                                          mlp_ratios=[8, 8, 4, 4], depths=[3, 3, 12, 3])
+        if device == 'cpu':
+            van = revert_sync_batchnorm(van)
+        encoder = networks.resnet_encoder.VAN_encoder(van)
+        depth_decoder = networks.DepthDecoder(encoder.num_ch_enc)
+        model_dict = encoder.state_dict()
+        encoder.load_state_dict({k: v for k, v in encoder_dict.items() if k in model_dict})
+        depth_decoder.load_state_dict(torch.load(decoder_path))
 
         encoder.to(device)
         depth_decoder.to(device)
@@ -226,7 +234,17 @@ def evaluate(opt):
         print(" Scaling ratios | med: {:0.3f} | std: {:0.3f}".format(med, np.std(ratios / med)))
 
     mean_errors = np.array(errors).mean(0)
-
+    
+    latest_run_id = list(filter(lambda x: x[-6:] == '.wandb', os.listdir('wandb/latest-run')))[0][4:-6]
+    print(f'Use latest wandb run to log summary: {latest_run_id}')
+    api = wandb.Api()
+    run = api.run(f"ilyaind/diploma/{latest_run_id}")
+    for k, v in zip(["abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"], mean_errors):
+        run.summary[f'test/{k}'] = v   
+    run.summary.update()
+    run.update()
+    run.save()
+    
     print("\n  " + ("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
     print(("&{: 8.3f}  " * 7).format(*mean_errors.tolist()) + "\\\\")
     print("\n-> Done!")
@@ -235,11 +253,6 @@ def evaluate(opt):
 if __name__ == "__main__":
     options = MonodepthOptions()
     opts = options.parse()
-    opts.no_cuda = False
-    opts.num_workers = 4
-    # opts.png = True
     opts.log_dir = 'logs'
-    opts.load_weights_folder = 'logs/models/weights_0'
     opts.eval_mono = True
-    opts.eval_split = 'eigen'
     evaluate(opts)

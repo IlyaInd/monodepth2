@@ -10,3 +10,4 @@ models
 /download_kitti.py
 /NOTES.md
 /kitti_dataset/
+*.tar

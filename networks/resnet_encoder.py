@@ -7,6 +7,7 @@
 from __future__ import absolute_import, division, print_function
 
 import numpy as np
+import gc
 
 import torch
 import torch.nn as nn
@@ -114,15 +115,19 @@ def load_weights(model, weights_path):
         del checkpoint["state_dict"]["head.weight"]
         del checkpoint["state_dict"]["head.bias"]
     model.load_state_dict(checkpoint["state_dict"], strict=strict)
+    print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
     if device == 'cpu':
         model = revert_sync_batchnorm(model)
+    del checkpoint
+    gc.collect()
+    print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
     return model
 
 class VAN_encoder(nn.Module):
     def __init__(self, van):
         super().__init__()
-        self.imagenet_mean = torch.Tensor([0.485, 0.456, 0.406])
-        self.imagenet_std = torch.Tensor([0.229, 0.224, 0.225])
+        self.register_buffer('imagenet_mean', torch.Tensor([0.485, 0.456, 0.406]))
+        self.register_buffer('imagenet_std', torch.Tensor([0.229, 0.224, 0.225]))
         self.num_ch_enc = np.array([64, 64, 128, 320, 512])
         self.conv_stem = nn.Sequential(
             nn.Conv2d(3, 64, kernel_size=(3,3), stride=2, padding=1),
