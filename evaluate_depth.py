@@ -94,11 +94,7 @@ def evaluate(opt):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # encoder = networks.ResnetEncoder(opt.num_layers, False)
-        # TODO: спрять этот пиздец в файл конфигурации энкодера
-        van = networks.resnet_encoder.VAN(embed_dims=[64, 128, 320, 512],
-                                          mlp_ratios=[8, 8, 4, 4], depths=[3, 3, 12, 3])
-        encoder = networks.resnet_encoder.VAN_encoder(van)
-
+        encoder = networks.resnet_encoder.VAN_encoder(zero_layer_mlp_ratio=4, zero_layer_depths=3)
         depth_decoder = networks.DepthDecoder(encoder.num_ch_enc)
 
         # TODO: препарировать этот участок. Зачем нужна подгрузка весов еще раз? Или это другое?
