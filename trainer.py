@@ -54,7 +54,7 @@ class Trainer:
         #     self.opt.num_layers, self.opt.weights_init == "pretrained")
         van = networks.resnet_encoder.VAN(embed_dims=[64, 128, 320, 512],
                                           mlp_ratios=[8, 8, 4, 4], depths=[3, 3, 12, 3])
-        print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')        
+        print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
         self.models["encoder"] = networks.resnet_encoder.VAN_encoder(van)
         self.models["encoder"].to(self.device)
         print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
@@ -106,8 +106,6 @@ class Trainer:
             self.parameters_to_train += list(self.models["predictive_mask"].parameters())
 
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
-        self.model_lr_scheduler = optim.lr_scheduler.StepLR(
-            self.model_optimizer, self.opt.scheduler_step_size, 0.1)
 
         if self.opt.load_weights_folder is not None:
             self.load_model()
@@ -131,6 +129,15 @@ class Trainer:
         num_train_samples = len(train_filenames)
         self.num_total_steps = num_train_samples // self.opt.batch_size * self.opt.num_epochs
 
+        if self.opt.scheduler == 'step':
+            self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size, 0.1, verbose=True)
+        elif self.opt.scheduler == 'cyclic':
+            self.model_lr_scheduler = optim.lr_scheduler.OneCycleLR(self.model_optimizer,
+                                                                    final_div_factor=self.opt.lr_final_div_factor,
+                                                                    pct_start=0.05, div_factor=100,
+                                                                    max_lr=self.opt.learning_rate,
+                                                                    anneal_strategy='cos', verbose=False,
+                                                                    total_steps=self.num_total_steps)
         train_dataset = self.dataset(
             self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 4, is_train=True, img_ext=img_ext)
@@ -144,10 +151,6 @@ class Trainer:
             val_dataset, self.opt.batch_size, True,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         self.val_iter = iter(self.val_loader)
-        #self.model_lr_scheduler = optim.lr_scheduler.OneCycleLR(self.model_optimizer,
-        #                                                        max_lr=3e-4, anneal_strategy='cos',
-        #                                                        total_steps=self.num_total_steps, pct_start=0.05,
-        #                                                        div_factor=100, final_div_factor=0.1, verbose=False)
 
         wandb.init(project="diploma", entity="ilyaind", reinit=True)
 
@@ -231,13 +234,15 @@ class Trainer:
                 # self.log("train", inputs, outputs, losses)
                 wandb.log({'train_' + key: val for key, val in losses.items()}, step=self.step)
                 self.val()
-            
+
             wandb.log({'learning_rate': self.model_lr_scheduler.get_last_lr()[0]}, step=self.step)
-            #self.model_lr_scheduler.step()
+            if self.opt.scheduler == 'cyclic':
+                self.model_lr_scheduler.step()
 
             self.step += 1
 
-        self.model_lr_scheduler.step()
+        if self.opt.scheduler == 'step':
+            self.model_lr_scheduler.step()
 
     def process_batch(self, inputs):
         """Pass a minibatch through the network and generate images and losses

@@ -84,6 +84,15 @@ class MonodepthOptions:
                                  default=[0, -1, 1])
 
         # OPTIMIZATION options
+        self.parser.add_argument("--scheduler",
+                                 type=str,
+                                 help="learning rate scheduler type",
+                                 default="step",
+                                 choices=["step", "cyclic"])
+        self.parser.add_argument("--lr_final_div_factor",
+                                 type=float,
+                                 help="final_div_factor param for cyclic lr scheduler",
+                                 default=0.1)
         self.parser.add_argument("--batch_size",
                                  type=int,
                                  help="batch size",
