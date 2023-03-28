@@ -16,7 +16,7 @@ import torch.utils.model_zoo as model_zoo
 from timm.models.vision_transformer import _cfg
 from mmcv.cnn.utils import revert_sync_batchnorm
 
-from .van import VAN
+from .van import VAN, ZeroVANlayer
 
 class ResNetMultiImageInput(models.ResNet):
     """Constructs a resnet model with varying number of input images.
@@ -141,23 +141,26 @@ class MultiHeadAttentionBlock(nn.Module):
 
 
 class VAN_encoder(nn.Module):
-    def __init__(self, van):
+    def __init__(self, zero_layer_mlp_ratio=4, zero_layer_depths=3):
         super().__init__()
         self.register_buffer('imagenet_mean', torch.Tensor([0.485, 0.456, 0.406]))
         self.register_buffer('imagenet_std', torch.Tensor([0.229, 0.224, 0.225]))
         self.num_ch_enc = np.array([64, 64, 128, 320, 512])
-        self.conv_stem = nn.Sequential(
-            nn.Conv2d(3, 64, kernel_size=(3,3), stride=2, padding=1),
-            nn.BatchNorm2d(64),
-            nn.Conv2d(64, 64, kernel_size=(3,3), padding=1)
-        )
+        # self.conv_stem = nn.Sequential(
+        #     nn.Conv2d(3, 64, kernel_size=(3, 3), stride=2, padding=1),
+        #     nn.BatchNorm2d(64),
+        #     nn.Conv2d(64, 64, kernel_size=(3, 3), padding=1)
+        # )
+        van = VAN(embed_dims=[64, 128, 320, 512],  mlp_ratios=[8, 8, 4, 4], depths=[3, 3, 12, 3])
+        self.zero_layer = ZeroVANlayer(mlp_ratio=zero_layer_mlp_ratio, depths=zero_layer_depths)
         self.van = load_weights(van, 'networks/van_base_828.pth.tar')
-        self.mhe_block = MultiHeadAttentionBlock(self.num_ch_enc[-1], 6, 20, nhead=8)
+        self.mha_block = MultiHeadAttentionBlock(self.num_ch_enc[-1], 6, 20, nhead=8)
 
     def forward(self, x):
         x = (x - self.imagenet_mean[None, :, None, None]) / self.imagenet_std[None, :, None, None]
-        out = [self.conv_stem(x)]
+        # out = [self.conv_stem(x)]
+        out = [self.zero_layer(x)]
         van_out = self.van(x)
         out.extend(van_out)
-        out[-1] = self.mhe_block(out[-1])
+        out[-1] += self.mha_block(out[-1])
         return out

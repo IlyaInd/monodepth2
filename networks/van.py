@@ -9,6 +9,7 @@ from torch.nn.modules.utils import _pair as to_2tuple
 
 from mmcv.cnn import build_norm_layer
 from mmcv.runner import BaseModule
+from mmcv.cnn.utils import revert_sync_batchnorm
 import math
 import warnings
 
@@ -136,6 +137,26 @@ class OverlapPatchEmbed(nn.Module):
         x = x.flatten(2).transpose(1, 2)
 
         return x, H, W
+
+
+class ZeroVANlayer(nn.Module):
+    def __init__(self, mlp_ratio=4, depths=3):
+        super().__init__()
+        patch_embed = OverlapPatchEmbed(patch_size=7, stride=2, in_chans=3, embed_dim=64)
+        self.patch_embed = revert_sync_batchnorm(patch_embed)
+        self.block = nn.ModuleList([Block(dim=64, mlp_ratio=mlp_ratio, drop=0, drop_path=0,
+                                          linear=False, norm_cfg=dict(type='BN', requires_grad=True))
+                                    for j in range(depths)])
+        self.norm = nn.LayerNorm(64)
+
+    def forward(self, x):
+        B = x.shape[0]
+        x, H, W = self.patch_embed(x)
+        for blk in self.block:
+            x = blk(x, H, W)
+        x = self.norm(x)
+        x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+        return x
 
 
 # @BACKBONES.register_module()

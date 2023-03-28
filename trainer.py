@@ -52,10 +52,7 @@ class Trainer:
 
         # self.models["encoder"] = networks.ResnetEncoder(
         #     self.opt.num_layers, self.opt.weights_init == "pretrained")
-        van = networks.resnet_encoder.VAN(embed_dims=[64, 128, 320, 512],
-                                          mlp_ratios=[8, 8, 4, 4], depths=[3, 3, 12, 3])
-        print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
-        self.models["encoder"] = networks.resnet_encoder.VAN_encoder(van)
+        self.models["encoder"] = networks.resnet_encoder.VAN_encoder(zero_layer_mlp_ratio=4, zero_layer_depths=3)
         self.models["encoder"].to(self.device)
         print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
         self.parameters_to_train += list(self.models["encoder"].parameters())
@@ -130,7 +127,7 @@ class Trainer:
         self.num_total_steps = num_train_samples // self.opt.batch_size * self.opt.num_epochs
 
         if self.opt.scheduler == 'step':
-            self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size, 0.1, verbose=True)
+            self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size, 0.1)
         elif self.opt.scheduler == 'cyclic':
             self.model_lr_scheduler = optim.lr_scheduler.OneCycleLR(self.model_optimizer,
                                                                     final_div_factor=self.opt.lr_final_div_factor,
