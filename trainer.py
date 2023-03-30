@@ -27,12 +27,9 @@ import datasets
 import networks
 
 
-def setup(rank, world_size):
-    """Sets up the process group and configuration for PyTorch Distributed Data Parallelism"""
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
-    # Initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+LOCAL_RANK = int(os.environ['LOCAL_RANK'])
+WORLD_SIZE = int(os.environ['WORLD_SIZE'])
+WORLD_RANK = int(os.environ['RANK'])
 
 
 def cleanup():
@@ -40,10 +37,9 @@ def cleanup():
     dist.destroy_process_group()
 
 class Trainer:
-    def __init__(self, options, rank, world_size):
+    def __init__(self, options):
+        dist.init_process_group("nccl", rank=WORLD_RANK, world_size=WORLD_SIZE)
         self.opt = options
-        self.rank = rank
-        self.world_size = world_size
         self.log_path = os.path.join(self.opt.log_dir, self.opt.model_name)
 
         # checking height and width are multiples of 32
@@ -53,7 +49,7 @@ class Trainer:
         self.models = {}
         self.parameters_to_train = []
 
-        self.device = torch.device("cpu" if self.opt.no_cuda else "cuda")
+        self.device = torch.device("cuda:{}".format(LOCAL_RANK))
 
         self.num_scales = len(self.opt.scales)
         self.num_input_frames = len(self.opt.frame_ids)
@@ -69,13 +65,13 @@ class Trainer:
         # self.models["encoder"] = networks.ResnetEncoder(
         #     self.opt.num_layers, self.opt.weights_init == "pretrained")
         self.models["encoder"] = networks.resnet_encoder.VAN_encoder(zero_layer_mlp_ratio=4, zero_layer_depths=3)
-        self.models["encoder"].to(self.rank)
-        ddp_encoder = DDP(self.models["encoder"], device_ids=[self.rank])
+        self.models["encoder"].to(self.device)
+        ddp_encoder = DDP(self.models["encoder"], device_ids=[LOCAL_RANK], output_device=LOCAL_RANK)
         self.parameters_to_train += list(ddp_encoder.parameters())
 
         self.models["depth"] = networks.DepthDecoder(self.models["encoder"].num_ch_enc, self.opt.scales)
-        self.models["depth"].to(self.rank)
-        ddp_depth = DDP(self.models["depth"], device_ids=[self.rank])
+        self.models["depth"].to(self.device)
+        ddp_depth = DDP(self.models["depth"], device_ids=[LOCAL_RANK], output_device=LOCAL_RANK)
         self.parameters_to_train += list(ddp_depth.parameters())
 
         if self.use_pose_net:
@@ -85,8 +81,8 @@ class Trainer:
                     self.opt.weights_init == "pretrained",
                     num_input_images=self.num_pose_frames)
 
-                self.models["pose_encoder"].to(self.rank)
-                ddp_pose_encoder = DDP(self.models["pose_encoder"], device_ids=[self.rank])
+                self.models["pose_encoder"].to(self.device)
+                ddp_pose_encoder = DDP(self.models["pose_encoder"], device_ids=[LOCAL_RANK], output_device=LOCAL_RANK)
                 self.parameters_to_train += list(ddp_pose_encoder.parameters())
 
                 self.models["pose"] = networks.PoseDecoder(
@@ -102,8 +98,8 @@ class Trainer:
                 self.models["pose"] = networks.PoseCNN(
                     self.num_input_frames if self.opt.pose_model_input == "all" else 2)
 
-            self.models["pose"].to(self.rank)
-            ddp_pose = DDP(self.models["pose"], device_ids=[self.rank])
+            self.models["pose"].to(self.device)
+            ddp_pose = DDP(self.models["pose"], device_ids=[LOCAL_RANK], output_device=LOCAL_RANK)
             self.parameters_to_train += list(ddp_pose.parameters())
 
         if self.opt.predictive_mask:
@@ -154,15 +150,17 @@ class Trainer:
         train_dataset = self.dataset(
             self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 4, is_train=True, img_ext=img_ext)
+        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
         self.train_loader = DataLoader(
             train_dataset, self.opt.batch_size, True,
-            num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
+            num_workers=self.opt.num_workers, pin_memory=True, drop_last=True, sampler=train_sampler)
         val_dataset = self.dataset(
             self.opt.data_path, val_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 4, is_train=False, img_ext=img_ext)
+        val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
         self.val_loader = DataLoader(
             val_dataset, self.opt.batch_size, True,
-            num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
+            num_workers=self.opt.num_workers, pin_memory=True, drop_last=True, sampler=val_sampler)
         self.val_iter = iter(self.val_loader)
 
         wandb.init(project="diploma", entity="ilyaind", reinit=True)
@@ -212,7 +210,7 @@ class Trainer:
         self.start_time = time.time()
         for self.epoch in range(self.opt.num_epochs):
             self.run_epoch()
-            if (self.epoch + 1) % self.opt.save_frequency == 0:
+            if (self.epoch + 1) % self.opt.save_frequency == 0 and LOCAL_RANK == 0:
                 self.save_model()
 
     def run_epoch(self):
