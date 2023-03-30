@@ -108,7 +108,7 @@ def load_weights(model, weights_path):
         device = 'cuda'
     else:
         device = 'cpu'
-    checkpoint = torch.load(weights_path, map_location=torch.device(device))
+    checkpoint = torch.load(weights_path, map_location='cpu')
     strict = True
     if not hasattr(model, 'num_classes') or model.num_classes != 1000:
         strict = False

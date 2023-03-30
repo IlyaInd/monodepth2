@@ -15,8 +15,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 # from tensorboardX import SummaryWriter
 import wandb
 
-from mmcv.cnn.utils import revert_sync_batchnorm
-
 import json
 
 from utils import *
@@ -32,13 +30,10 @@ WORLD_SIZE = int(os.environ['WORLD_SIZE'])
 WORLD_RANK = int(os.environ['RANK'])
 
 
-def cleanup():
-    """Cleans up the distributed environment"""
-    dist.destroy_process_group()
-
 class Trainer:
     def __init__(self, options):
         dist.init_process_group("nccl", rank=WORLD_RANK, world_size=WORLD_SIZE)
+        print(f"LOCAL RANK = {LOCAL_RANK}, WORLD_SIZE = {WORLD_SIZE}, WORLD_RANK={WORLD_RANK}\n")
         self.opt = options
         self.log_path = os.path.join(self.opt.log_dir, self.opt.model_name)
 
@@ -119,8 +114,9 @@ class Trainer:
         if self.opt.load_weights_folder is not None:
             self.load_model()
 
-        print("Training model named:\n  ", self.opt.model_name)
-        print("Models and tensorboard events files are saved to:\n  ", self.opt.log_dir)
+        if LOCAL_RANK == 0:
+            print("Training model named:\n  ", self.opt.model_name)
+            print("Models and tensorboard events files are saved to:\n  ", self.opt.log_dir)
         print("Training is using:\n  ", self.device)
 
         # data
@@ -136,7 +132,9 @@ class Trainer:
         img_ext = '.png' if self.opt.png else '.jpg'
 
         num_train_samples = len(train_filenames)
-        self.num_total_steps = num_train_samples // self.opt.batch_size * self.opt.num_epochs
+        self.num_total_steps = num_train_samples // (self.opt.batch_size * WORLD_SIZE) * self.opt.num_epochs
+
+        print(f'TOTAL STEPS = {self.num_total_steps}')
 
         if self.opt.scheduler == 'step':
             self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size, 0.1)
@@ -152,18 +150,19 @@ class Trainer:
             self.opt.frame_ids, 4, is_train=True, img_ext=img_ext)
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
         self.train_loader = DataLoader(
-            train_dataset, self.opt.batch_size, True,
+            train_dataset, self.opt.batch_size, shuffle=False,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True, sampler=train_sampler)
         val_dataset = self.dataset(
             self.opt.data_path, val_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 4, is_train=False, img_ext=img_ext)
         val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
         self.val_loader = DataLoader(
-            val_dataset, self.opt.batch_size, True,
+            val_dataset, self.opt.batch_size, shuffle=False,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True, sampler=val_sampler)
         self.val_iter = iter(self.val_loader)
 
-        wandb.init(project="diploma", entity="ilyaind", reinit=True)
+        if LOCAL_RANK == 0:
+            wandb.init(project="diploma", entity="ilyaind", reinit=True)
 
         if not self.opt.no_ssim:
             self.ssim = SSIM()
@@ -183,12 +182,12 @@ class Trainer:
 
         self.depth_metric_names = [
             "de/abs_rel", "de/sq_rel", "de/rms", "de/log_rms", "da/a1", "da/a2", "da/a3"]
+        if LOCAL_RANK == 0:
+            print("Using split:\n  ", self.opt.split)
+            print("There are {:d} training items and {:d} validation items\n".format(
+                len(train_dataset), len(val_dataset)))
 
-        print("Using split:\n  ", self.opt.split)
-        print("There are {:d} training items and {:d} validation items\n".format(
-            len(train_dataset), len(val_dataset)))
-
-        self.save_opts()
+            self.save_opts()
 
     def set_train(self):
         """Convert all models to training mode
@@ -217,8 +216,8 @@ class Trainer:
         """Run a single epoch of training and validation
         """
         # self.model_lr_scheduler.step()
-
-        print("Training")
+        if LOCAL_RANK == 0:
+            print("Training")
         self.set_train()
 
         for batch_idx, inputs in enumerate(self.train_loader):
@@ -243,10 +242,12 @@ class Trainer:
                     self.compute_depth_losses(inputs, outputs, losses)
 
                 # self.log("train", inputs, outputs, losses)
-                wandb.log({'train_' + key: val for key, val in losses.items()}, step=self.step)
-                self.val()
+                if LOCAL_RANK == 0:
+                    wandb.log({'train_' + key: val for key, val in losses.items()}, step=self.step)
+                    self.val()
 
-            wandb.log({'learning_rate': self.model_lr_scheduler.get_last_lr()[0]}, step=self.step)
+            if LOCAL_RANK == 0:
+                wandb.log({'learning_rate': self.model_lr_scheduler.get_last_lr()[0]}, step=self.step)
             if self.opt.scheduler == 'cyclic':
                 self.model_lr_scheduler.step()
 
@@ -254,7 +255,6 @@ class Trainer:
 
         if self.opt.scheduler == 'step':
             self.model_lr_scheduler.step()
-        cleanup()
 
     def process_batch(self, inputs):
         """Pass a minibatch through the network and generate images and losses
@@ -365,7 +365,8 @@ class Trainer:
                 self.compute_depth_losses(inputs, outputs, losses)
 
             # self.log("val", inputs, outputs, losses)
-            wandb.log({'val_' + key: val for key, val in losses.items()}, step=self.step)
+            if LOCAL_RANK == 0:
+                wandb.log({'val_' + key: val for key, val in losses.items()}, step=self.step)
             del inputs, outputs, losses
 
         self.set_train()
@@ -562,8 +563,8 @@ class Trainer:
         """
         samples_per_sec = self.opt.batch_size / duration
         time_sofar = time.time() - self.start_time
-        training_time_left = (
-            self.num_total_steps / self.step - 1.0) * time_sofar if self.step > 0 else 0
+        one_step_duration = time_sofar / (self.step + 1)
+        training_time_left = (self.num_total_steps - self.step) / one_step_duration if self.step > 0 else 0
         print_string = "epoch {:>3} | batch {:>6} | examples/s: {:5.1f}" + \
             " | loss: {:.5f} | time elapsed: {} | time left: {}"
         print(print_string.format(self.epoch, batch_idx, samples_per_sec, loss,
