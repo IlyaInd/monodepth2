@@ -10,6 +10,8 @@ import time
 
 import torch.optim as optim
 from torch.utils.data import DataLoader
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 # from tensorboardX import SummaryWriter
 import wandb
 
@@ -25,9 +27,23 @@ import datasets
 import networks
 
 
+def setup(rank, world_size):
+    """Sets up the process group and configuration for PyTorch Distributed Data Parallelism"""
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+    # Initialize the process group
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+
+
+def cleanup():
+    """Cleans up the distributed environment"""
+    dist.destroy_process_group()
+
 class Trainer:
-    def __init__(self, options):
+    def __init__(self, options, rank, world_size):
         self.opt = options
+        self.rank = rank
+        self.world_size = world_size
         self.log_path = os.path.join(self.opt.log_dir, self.opt.model_name)
 
         # checking height and width are multiples of 32
@@ -53,15 +69,14 @@ class Trainer:
         # self.models["encoder"] = networks.ResnetEncoder(
         #     self.opt.num_layers, self.opt.weights_init == "pretrained")
         self.models["encoder"] = networks.resnet_encoder.VAN_encoder(zero_layer_mlp_ratio=4, zero_layer_depths=3)
-        self.models["encoder"].to(self.device)
-        print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
-        self.parameters_to_train += list(self.models["encoder"].parameters())
+        self.models["encoder"].to(self.rank)
+        ddp_encoder = DDP(self.models["encoder"], device_ids=[self.rank])
+        self.parameters_to_train += list(ddp_encoder.parameters())
 
-        self.models["depth"] = networks.DepthDecoder(
-            self.models["encoder"].num_ch_enc, self.opt.scales)
-        self.models["depth"].to(self.device)
-        print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
-        self.parameters_to_train += list(self.models["depth"].parameters())
+        self.models["depth"] = networks.DepthDecoder(self.models["encoder"].num_ch_enc, self.opt.scales)
+        self.models["depth"].to(self.rank)
+        ddp_depth = DDP(self.models["depth"], device_ids=[self.rank])
+        self.parameters_to_train += list(ddp_depth.parameters())
 
         if self.use_pose_net:
             if self.opt.pose_model_type == "separate_resnet":
@@ -70,8 +85,9 @@ class Trainer:
                     self.opt.weights_init == "pretrained",
                     num_input_images=self.num_pose_frames)
 
-                self.models["pose_encoder"].to(self.device)
-                self.parameters_to_train += list(self.models["pose_encoder"].parameters())
+                self.models["pose_encoder"].to(self.rank)
+                ddp_pose_encoder = DDP(self.models["pose_encoder"], device_ids=[self.rank])
+                self.parameters_to_train += list(ddp_pose_encoder.parameters())
 
                 self.models["pose"] = networks.PoseDecoder(
                     self.models["pose_encoder"].num_ch_enc,
@@ -86,9 +102,9 @@ class Trainer:
                 self.models["pose"] = networks.PoseCNN(
                     self.num_input_frames if self.opt.pose_model_input == "all" else 2)
 
-            self.models["pose"].to(self.device)
-            print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
-            self.parameters_to_train += list(self.models["pose"].parameters())
+            self.models["pose"].to(self.rank)
+            ddp_pose = DDP(self.models["pose"], device_ids=[self.rank])
+            self.parameters_to_train += list(ddp_pose.parameters())
 
         if self.opt.predictive_mask:
             assert self.opt.disable_automasking, \
@@ -240,6 +256,7 @@ class Trainer:
 
         if self.opt.scheduler == 'step':
             self.model_lr_scheduler.step()
+        cleanup()
 
     def process_batch(self, inputs):
         """Pass a minibatch through the network and generate images and losses
