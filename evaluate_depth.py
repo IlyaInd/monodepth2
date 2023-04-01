@@ -3,6 +3,8 @@ from __future__ import absolute_import, division, print_function
 import os
 import cv2
 import numpy as np
+import warnings
+warnings.filterwarnings('ignore', module='mmcv')
 
 import torch
 from torch.utils.data import DataLoader
@@ -93,7 +95,8 @@ def evaluate(opt):
 
         # encoder = networks.ResnetEncoder(opt.num_layers, False)
         encoder = networks.resnet_encoder.VAN_encoder(zero_layer_mlp_ratio=4, zero_layer_depths=3)
-        depth_decoder = networks.DepthDecoder(encoder.num_ch_enc)
+        # depth_decoder = networks.DepthDecoder(encoder.num_ch_enc)
+        depth_decoder = networks.depth_decoder.HRDepthDecoder(num_ch_enc=[64, 64, 128, 320, 512])
         model_dict = encoder.state_dict()
         encoder.load_state_dict({k: v for k, v in encoder_dict.items() if k in model_dict})
         depth_decoder.load_state_dict(torch.load(decoder_path))
