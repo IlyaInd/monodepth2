@@ -127,19 +127,27 @@ class Trainer:
 
         if self.opt.scheduler == 'step':
             self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size, 0.1)
-        elif self.opt.scheduler == 'cyclic':
+        elif self.opt.scheduler == 'one_cycle':
             self.model_lr_scheduler = optim.lr_scheduler.OneCycleLR(self.model_optimizer,
                                                                     final_div_factor=self.opt.lr_final_div_factor,
                                                                     pct_start=0.05, div_factor=100,
                                                                     max_lr=self.opt.learning_rate,
                                                                     anneal_strategy='cos', verbose=False,
                                                                     total_steps=self.num_total_steps)
+        elif self.opt.scheduler == 'cyclic':
+            min_lr = self.opt.learning_rate / self.opt.lr_final_div_factor
+            one_epoch_length = self.num_total_steps // self.opt.num_epochs
+            self.model_lr_scheduler = optim.lr_scheduler.CyclicLR(self.model_optimizer, cycle_momentum=False,
+                                                                  base_lr=min_lr, max_lr=self.opt.learning_rate,
+                                                                  step_size_up=one_epoch_length * 1,
+                                                                  mode='triangular', verbose=False)
         train_dataset = self.dataset(
             self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 4, is_train=True, img_ext=img_ext)
 
         oneitem = train_dataset.__getitem__(0)
 
+        self.val_batch_size_ratio = 8
         self.train_loader = DataLoader(
             train_dataset, self.opt.batch_size, True,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
@@ -147,7 +155,7 @@ class Trainer:
             self.opt.data_path, val_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 4, is_train=False, img_ext=img_ext)
         self.val_loader = DataLoader(
-            val_dataset, self.opt.batch_size, True,
+            val_dataset, self.opt.batch_size * self.val_batch_size_ratio, True,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         self.val_iter = iter(self.val_loader)
 
@@ -163,10 +171,10 @@ class Trainer:
             h = self.opt.height // (2 ** scale)
             w = self.opt.width // (2 ** scale)
 
-            self.backproject_depth[scale] = BackprojectDepth(self.opt.batch_size, h, w)
+            self.backproject_depth[scale] = BackprojectDepth(self.opt.batch_size, h, w, self.val_batch_size_ratio)
             self.backproject_depth[scale].to(self.device)
 
-            self.project_3d[scale] = Project3D(self.opt.batch_size, h, w)
+            self.project_3d[scale] = Project3D(self.opt.batch_size, h, w, self.val_batch_size_ratio)
             self.project_3d[scale].to(self.device)
 
         self.depth_metric_names = [
@@ -235,7 +243,7 @@ class Trainer:
                 self.val()
 
             wandb.log({'learning_rate': self.model_lr_scheduler.get_last_lr()[0]}, step=self.step)
-            if self.opt.scheduler == 'cyclic':
+            if self.opt.scheduler == 'one_cycle' or self.opt.scheduler == 'cyclic':
                 self.model_lr_scheduler.step()
 
             self.step += 1

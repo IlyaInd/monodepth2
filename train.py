@@ -20,6 +20,9 @@ opts.num_epochs = 1
 opts.log_dir = '/Users/ilya/Документы/Учеба/Диплом/code/monodepth2/logs'
 # opts.dataset = 'kitti_depth'
 opts.log_frequency = 1
+opts.batch_size = 2
+opts.scheduler = 'cyclic'
+opts.lr_final_div_factor = 4
 
 # структура файлов глубин
 # depth_path = '/kitti_data/2011_09_26/2011_09_26_drive_0001_sync/proj_depth/groundtruth/image_03/0000000077.png'
