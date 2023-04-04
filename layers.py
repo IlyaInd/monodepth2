@@ -139,32 +139,38 @@ class Conv3x3(nn.Module):
 class BackprojectDepth(nn.Module):
     """Layer to transform a depth image into a point cloud
     """
-    def __init__(self, batch_size, height, width):
+    def __init__(self, batch_size, height, width, val_ratio=8):
         super(BackprojectDepth, self).__init__()
 
         self.batch_size = batch_size
+        self.batch_size_val = batch_size * val_ratio
         self.height = height
         self.width = width
 
         meshgrid = np.meshgrid(range(self.width), range(self.height), indexing='xy')
         self.id_coords = np.stack(meshgrid, axis=0).astype(np.float32)
-        self.id_coords = nn.Parameter(torch.from_numpy(self.id_coords),
-                                      requires_grad=False)
+        self.id_coords = nn.Parameter(torch.from_numpy(self.id_coords), requires_grad=False)
 
-        self.ones = nn.Parameter(torch.ones(self.batch_size, 1, self.height * self.width),
-                                 requires_grad=False)
+        self.ones = nn.Parameter(torch.ones(self.batch_size, 1, self.height * self.width), requires_grad=False)
+        self.ones_val = nn.Parameter(torch.ones(self.batch_size_val, 1, self.height * self.width), requires_grad=False)
 
-        self.pix_coords = torch.unsqueeze(torch.stack(
+        pix_coords = torch.unsqueeze(torch.stack(
             [self.id_coords[0].view(-1), self.id_coords[1].view(-1)], 0), 0)
-        self.pix_coords = self.pix_coords.repeat(batch_size, 1, 1)
-        self.pix_coords = nn.Parameter(torch.cat([self.pix_coords, self.ones], 1),
-                                       requires_grad=False)
+
+        self.pix_coords = pix_coords.repeat(batch_size, 1, 1)
+        self.pix_coords_val = pix_coords.repeat(self.batch_size_val, 1, 1)
+
+        self.pix_coords = nn.Parameter(torch.cat([self.pix_coords, self.ones], 1), requires_grad=False)
+        self.pix_coords_val = nn.Parameter(torch.cat([self.pix_coords_val, self.ones_val], 1), requires_grad=False)
 
     def forward(self, depth, inv_K):
-        cam_points = torch.matmul(inv_K[:, :3, :3], self.pix_coords)
-        cam_points = depth.view(self.batch_size, 1, -1) * cam_points
-        cam_points = torch.cat([cam_points, self.ones], 1)
-
+        if depth.shape[0] == self.batch_size:
+            batch_size, ones, pix_coords = self.batch_size, self.ones, self.pix_coords
+        elif depth.shape[0] == self.batch_size_val:
+            batch_size, ones, pix_coords = self.batch_size_val, self.ones_val, self.pix_coords_val
+        cam_points = torch.matmul(inv_K[:, :3, :3], pix_coords)
+        cam_points = depth.view(batch_size, 1, -1) * cam_points
+        cam_points = torch.cat([cam_points, ones], 1)
         return cam_points
 
 
@@ -181,11 +187,11 @@ class Project3D(nn.Module):
 
     def forward(self, points, K, T):
         P = torch.matmul(K, T)[:, :3, :]
-
+        batch_size = points.shape[0]
         cam_points = torch.matmul(P, points)
 
         pix_coords = cam_points[:, :2, :] / (cam_points[:, 2, :].unsqueeze(1) + self.eps)
-        pix_coords = pix_coords.view(self.batch_size, 2, self.height, self.width)
+        pix_coords = pix_coords.view(batch_size, 2, self.height, self.width)
         pix_coords = pix_coords.permute(0, 2, 3, 1)
         pix_coords[..., 0] /= self.width - 1
         pix_coords[..., 1] /= self.height - 1
