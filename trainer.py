@@ -13,8 +13,6 @@ from torch.utils.data import DataLoader
 # from tensorboardX import SummaryWriter
 import wandb
 
-from mmcv.cnn.utils import revert_sync_batchnorm
-
 import json
 
 from utils import *
@@ -122,10 +120,6 @@ class Trainer:
         val_filenames = readlines(fpath.format("val"))
         img_ext = '.png' if self.opt.png else '.jpg'
 
-        # === DISSECTION ===
-        train_filenames = list(filter(lambda x: x.find('09_26_drive_0001') > -1, train_filenames))
-        val_filenames = list(filter(lambda x: x.find('09_26_drive_0001') > -1, val_filenames))
-
         num_train_samples = len(train_filenames)
         self.num_total_steps = num_train_samples // self.opt.batch_size * self.opt.num_epochs
 
@@ -158,7 +152,7 @@ class Trainer:
             self.opt.data_path, val_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 4, is_train=False, img_ext=img_ext)
         self.val_loader = DataLoader(
-            val_dataset, self.opt.batch_size * self.val_batch_size_ratio, True,
+            val_dataset, self.opt.batch_size, True,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         self.val_iter = iter(self.val_loader)
 
@@ -174,10 +168,10 @@ class Trainer:
             h = self.opt.height // (2 ** scale)
             w = self.opt.width // (2 ** scale)
 
-            self.backproject_depth[scale] = BackprojectDepth(self.opt.batch_size, h, w, self.val_batch_size_ratio)
+            self.backproject_depth[scale] = BackprojectDepth(self.opt.batch_size, h, w)
             self.backproject_depth[scale].to(self.device)
 
-            self.project_3d[scale] = Project3D(self.opt.batch_size, h, w, self.val_batch_size_ratio)
+            self.project_3d[scale] = Project3D(self.opt.batch_size, h, w)
             self.project_3d[scale].to(self.device)
 
         self.depth_metric_names = [
@@ -251,7 +245,6 @@ class Trainer:
 
                 # self.log("train", inputs, outputs, losses)
                 wandb.log({'train_' + key: val for key, val in losses.items()}, step=self.step)
-                del inputs, outputs, losses
                 self.val()
 
             wandb.log({'learning_rate': self.model_lr_scheduler.get_last_lr()[0]}, step=self.step)
@@ -359,21 +352,25 @@ class Trainer:
         """Validate the model on a single minibatch
         """
         self.set_eval()
-        try:
-            inputs = next(self.val_iter)
-        except StopIteration:
-            self.val_iter = iter(self.val_loader)
-            inputs = next(self.val_iter)
+        losses_total = []
+        for i in range(self.val_batch_size_ratio):
+            try:
+                inputs = next(self.val_iter)
+            except StopIteration:
+                self.val_iter = iter(self.val_loader)
+                inputs = next(self.val_iter)
 
-        with torch.no_grad():
-            outputs, losses = self.process_batch(inputs)
+            with torch.no_grad():
+                outputs, losses = self.process_batch(inputs)
 
-            if "depth_gt" in inputs:
-                self.compute_depth_losses(inputs, outputs, losses)
+                if "depth_gt" in inputs:
+                    self.compute_depth_losses(inputs, outputs, losses)
+            losses_total.append(losses)
 
-            # self.log("val", inputs, outputs, losses)
-            wandb.log({'val_' + key: val for key, val in losses.items()}, step=self.step)
-            del inputs, outputs, losses
+        # Convert list of dicts to dict of lists and then get mean of each list
+        losses_total = {k: np.mean([dic[k].item() for dic in losses_total]) for k in losses_total[0]}
+        wandb.log({'val_' + key: val for key, val in losses_total.items()}, step=self.step)
+        del inputs, outputs, losses
 
         self.set_train()
 
