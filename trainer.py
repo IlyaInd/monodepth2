@@ -122,6 +122,10 @@ class Trainer:
         val_filenames = readlines(fpath.format("val"))
         img_ext = '.png' if self.opt.png else '.jpg'
 
+        # === DISSECTION ===
+        train_filenames = list(filter(lambda x: x.find('09_26_drive_0001') > -1, train_filenames))
+        val_filenames = list(filter(lambda x: x.find('09_26_drive_0001') > -1, val_filenames))
+
         num_train_samples = len(train_filenames)
         self.num_total_steps = num_train_samples // self.opt.batch_size * self.opt.num_epochs
 
@@ -144,6 +148,8 @@ class Trainer:
         train_dataset = self.dataset(
             self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 4, is_train=True, img_ext=img_ext)
+
+        self.accumulation_steps = self.opt.grad_accumulation_steps
         self.val_batch_size_ratio = 9
         self.train_loader = DataLoader(
             train_dataset, self.opt.batch_size, True,
@@ -219,9 +225,17 @@ class Trainer:
             before_op_time = time.time()
             outputs, losses = self.process_batch(inputs)
 
-            self.model_optimizer.zero_grad()
-            losses["loss"].backward()
-            self.model_optimizer.step()
+            if self.accumulation_steps > 1:
+                losses_norm = {k: v / self.accumulation_steps for k, v in losses.items()}
+                losses_norm["loss"].backward()
+
+                if (batch_idx + 1) % self.accumulation_steps == 0 or batch_idx + 1 == len(self.train_loader):
+                    self.model_optimizer.step()
+                    self.model_optimizer.zero_grad()
+            else:
+                self.model_optimizer.zero_grad()
+                losses["loss"].backward()
+                self.model_optimizer.step()
 
             duration = time.time() - before_op_time
 

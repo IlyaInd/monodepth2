@@ -97,6 +97,10 @@ class MonodepthOptions:
                                  type=int,
                                  help="batch size",
                                  default=12)
+        self.parser.add_argument("--grad_accumulation_steps",
+                                 type=int,
+                                 help="number of mini-batch to accumulate grads before optimizer step",
+                                 default=1)
         self.parser.add_argument("--learning_rate",
                                  type=float,
                                  help="learning rate",
