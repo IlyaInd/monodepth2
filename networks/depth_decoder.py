@@ -11,7 +11,8 @@ import torch
 import torch.nn as nn
 
 from collections import OrderedDict
-from .hr_layers import ConvBlock, fSEModule, Conv3x3, Conv1x1, upsample
+from .van import VAN, Block
+from .hr_layers import ConvBlock, fSEModule, Conv3x3, Conv1x1, upsample, ConvBlockSELU
 from layers import *
 
 
@@ -175,3 +176,63 @@ class HRDepthDecoder(nn.Module):
         outputs[('disp', 2)] = self.sigmoid(self.convs["dispConvScale2"](features["X_13"]))  # (64, 1)
         outputs[('disp', 3)] = self.sigmoid(self.convs["dispConvScale3"](features["X_22"]))  # (128, 1)
         return outputs
+
+
+class VAN_decoder(VAN):
+    def __init__(self,
+                 num_ch_enc=(64, 64, 128, 320, 512),
+                 mlp_ratios=(4, 4, 4, 4),
+                 depths=(1, 1, 2, 1),
+                 linear=False,
+                 norm_cfg=dict(type='BN', requires_grad=True)):
+        super(VAN, self).__init__()
+        self.depths = depths
+        self.num_ch_enc = num_ch_enc
+        self.num_ch_dec = (32, 64, 64, 128, 320)
+        self.linear = linear
+
+        for i in range(4, -1, -1):
+            num_ch_in = self.num_ch_enc[-1] if i == 4 else self.num_ch_enc[i] * 2
+            num_ch_out = self.num_ch_dec[i]
+            halving_conv = ConvBlockSELU(num_ch_in, num_ch_out)
+            setattr(self, f"halving_conv_{i + 1}", halving_conv)
+
+            if i < 4:  # there is no VAN block on last level
+                block = nn.ModuleList([Block(dim=self.num_ch_enc[i] * 2,
+                                             mlp_ratio=mlp_ratios[i],
+                                             drop=0.,
+                                             drop_path=0.,
+                                             linear=linear,
+                                             norm_cfg=norm_cfg)
+                                       for j in range(depths[i])])
+
+                norm = nn.LayerNorm(self.num_ch_enc[i] * 2)
+                setattr(self, f"block{i + 1}", block)
+                setattr(self, f"norm{i + 1}", norm)
+
+        for d in range(3, -1, -1):
+            num_ch_in = self.num_ch_dec[d] * 2 if d > 0 else self.num_ch_dec[d]
+            disparity_head = Conv3x3(num_ch_in, 1)
+            setattr(self, f"disp_head_{d + 1}", disparity_head)
+
+    def forward(self, input_features):
+        outs = {}
+        x = input_features[-1]
+        for s in range(5, 0, -1):
+            halving_conv = getattr(self, f"halving_conv_{s}")
+            x = halving_conv(x)
+            x = upsample(x)
+            if s >= 2:
+                x = torch.cat([x, input_features[s - 2]], dim=1)
+                block = getattr(self, f"block{s-1}")
+                norm = getattr(self, f"norm{s-1}")
+                B, C, H, W = x.shape
+                x = x.flatten(2).permute(0, 2, 1)  # [B, N, C]
+                for blk in block:
+                    x = blk(x, H, W)
+                x = norm(x)
+                x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+            if s <= 4:
+                disp_head = getattr(self, f"disp_head_{s}")
+                outs[("disp", s - 1)] = disp_head(x).sigmoid()
+        return outs

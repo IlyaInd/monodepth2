@@ -50,14 +50,13 @@ class Trainer:
 
         # self.models["encoder"] = networks.ResnetEncoder(
         #     self.opt.num_layers, self.opt.weights_init == "pretrained")
-        self.models["encoder"] = networks.resnet_encoder.VAN_encoder(zero_layer_mlp_ratio=4, zero_layer_depths=3)
+        self.models["encoder"] = networks.resnet_encoder.VAN_encoder(zero_layer_mlp_ratio=4, zero_layer_depths=1)
         self.models["encoder"].to(self.device)
-        print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
         self.parameters_to_train += list(self.models["encoder"].parameters())
 
-        self.models["depth"] = networks.depth_decoder.HRDepthDecoder(num_ch_enc=[64, 64, 128, 320, 512])
+        # self.models["depth"] = networks.depth_decoder.HRDepthDecoder(num_ch_enc=[64, 64, 128, 320, 512])
+        self.models["depth"] = networks.depth_decoder.VAN_decoder(mlp_ratios=(4, 4, 4, 4), depths=(1, 1, 2, 1))
         self.models["depth"].to(self.device)
-        print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
         self.parameters_to_train += list(self.models["depth"].parameters())
 
         if self.use_pose_net:
@@ -84,7 +83,6 @@ class Trainer:
                     self.num_input_frames if self.opt.pose_model_input == "all" else 2)
 
             self.models["pose"].to(self.device)
-            print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
             self.parameters_to_train += list(self.models["pose"].parameters())
 
         if self.opt.predictive_mask:
@@ -124,7 +122,8 @@ class Trainer:
         self.num_total_steps = num_train_samples // self.opt.batch_size * self.opt.num_epochs
 
         if self.opt.scheduler == 'step':
-            self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size, 0.1)
+            self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size,
+                                                                self.opt.lr_final_div_factor)
         elif self.opt.scheduler == 'one_cycle':
             self.model_lr_scheduler = optim.lr_scheduler.OneCycleLR(self.model_optimizer,
                                                                     final_div_factor=self.opt.lr_final_div_factor,
@@ -259,6 +258,7 @@ class Trainer:
     def process_batch(self, inputs):
         """Pass a minibatch through the network and generate images and losses
         """
+        #torch.cuda.reset_peak_memory_stats()
         for key, ipt in inputs.items():
             inputs[key] = ipt.to(self.device)
 
@@ -287,6 +287,7 @@ class Trainer:
 
         self.generate_images_pred(inputs, outputs)
         losses = self.compute_losses(inputs, outputs)
+        #print(f"CUDA MAX_MEMORY_ALLOCATED = {round(torch.cuda.max_memory_allocated() / 1024 ** 3, 2)} GB")
 
         return outputs, losses
 

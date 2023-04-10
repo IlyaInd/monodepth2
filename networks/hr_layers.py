@@ -146,6 +146,12 @@ class ConvBlock(nn.Module):
         return out
 
 
+class ConvBlockSELU(ConvBlock):
+    def __init__(self, in_channels, out_channels):
+        super().__init__(in_channels, out_channels)
+        self.nonlin = nn.SELU(inplace=True)
+
+
 class Conv3x3(nn.Module):
     """Layer to pad and convolve input
     """
