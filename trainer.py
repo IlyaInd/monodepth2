@@ -50,12 +50,12 @@ class Trainer:
 
         # self.models["encoder"] = networks.ResnetEncoder(
         #     self.opt.num_layers, self.opt.weights_init == "pretrained")
-        self.models["encoder"] = networks.resnet_encoder.VAN_encoder(zero_layer_mlp_ratio=4, zero_layer_depths=1)
+        self.models["encoder"] = networks.resnet_encoder.VAN_encoder(4, 2, True, 'networks/van_small_811.pth.tar')
         self.models["encoder"].to(self.device)
         self.parameters_to_train += list(self.models["encoder"].parameters())
 
-        # self.models["depth"] = networks.depth_decoder.HRDepthDecoder(num_ch_enc=[64, 64, 128, 320, 512])
-        self.models["depth"] = networks.depth_decoder.VAN_decoder(mlp_ratios=(4, 4, 4, 4), depths=(1, 1, 2, 1))
+        self.models["depth"] = networks.depth_decoder.HRDepthDecoder(num_ch_enc=[64, 64, 128, 320, 512])
+        # self.models["depth"] = networks.depth_decoder.VAN_decoder(mlp_ratios=(4, 4, 4, 4), depths=(2, 2, 3, 2))
         self.models["depth"].to(self.device)
         self.parameters_to_train += list(self.models["depth"].parameters())
 
@@ -143,7 +143,7 @@ class Trainer:
             self.opt.frame_ids, 4, is_train=True, img_ext=img_ext)
 
         self.accumulation_steps = self.opt.grad_accumulation_steps
-        self.val_batch_size_ratio = 9
+        self.val_batch_size_ratio = 12
         self.train_loader = DataLoader(
             train_dataset, self.opt.batch_size, True,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)

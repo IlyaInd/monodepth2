@@ -115,12 +115,10 @@ def load_weights(model, weights_path):
         del checkpoint["state_dict"]["head.weight"]
         del checkpoint["state_dict"]["head.bias"]
     model.load_state_dict(checkpoint["state_dict"], strict=strict)
-    print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
     if device == 'cpu':
         model = revert_sync_batchnorm(model)
     del checkpoint
     gc.collect()
-    print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
     return model
 
 
@@ -152,7 +150,10 @@ class VAN_encoder(nn.Module):
         #     nn.BatchNorm2d(64),
         #     nn.Conv2d(64, 64, kernel_size=(3, 3), padding=1)
         # )
-        van = VAN(embed_dims=[64, 128, 320, 512],  mlp_ratios=[8, 8, 4, 4], depths=[3, 3, 12, 3])
+        van = VAN(embed_dims=[64, 128, 320, 512],  mlp_ratios=[8, 8, 4, 4],
+                  # depths=[3, 3, 12, 3],
+                  depths=[2, 2, 4, 2]
+                  )
         self.zero_layer = ZeroVANlayer(mlp_ratio=zero_layer_mlp_ratio, depths=zero_layer_depths)
         if pretrained:
             van = load_weights(van, path_to_weights)
