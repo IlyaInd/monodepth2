@@ -259,11 +259,6 @@ class Project3D(nn.Module):
         return pix_coords
 
 
-def upsample(x):
-    """Upsample input tensor by a factor of 2
-    """
-    return F.interpolate(x, scale_factor=2, mode="nearest")
-
 def get_smooth_loss(disp, img):
     """Computes the smoothness loss for a disparity image
     The color image is used for edge-aware smoothness

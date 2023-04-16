@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 
 from collections import OrderedDict
-from .van import VAN, Block
+from .van import VAN, Block, VAN_Block
 from .hr_layers import ConvBlock, fSEModule, Conv3x3, Conv1x1, upsample, ConvBlockSELU
 from layers import *
 from .hr_layers_diffnet import Attention_Module
@@ -84,6 +84,7 @@ class HRDepthDecoder(nn.Module):
         self.non_attention_position = ["01", "11", "21", "02", "12", "03"]
 
         self.convs = nn.ModuleDict()
+        self.van_blocks = nn.ModuleDict()
         for j in range(5):
             for i in range(5 - j):
                 # upconv 0
@@ -106,9 +107,11 @@ class HRDepthDecoder(nn.Module):
 
             fse_high_ch = num_ch_enc[row + 1] // 2
             fse_low_ch = self.num_ch_enc[row] + self.num_ch_dec[row + 1] * (col - 1)
-            fse_out_ch = None if index == "04" else self.num_ch_enc[row]
+            fse_out_ch = fse_high_ch if index == "04" else self.num_ch_enc[row]
+            van_depths = 2 if index == "22" else 1
 
             self.convs["X_" + index + "_attention"] = fSEModule(fse_high_ch, fse_low_ch, fse_out_ch)
+            self.van_blocks["X_" + index] = VAN_Block(num_ch=fse_out_ch, depth=van_depths, mlp_ratio=4)
 
         for index in self.non_attention_position:
             row = int(index[0])
@@ -125,7 +128,7 @@ class HRDepthDecoder(nn.Module):
         for i in range(4):
             self.convs["dispConvScale{}".format(i)] = Conv3x3(self.num_ch_dec[i], self.num_output_channels)
 
-        self.decoder = nn.ModuleList(list(self.convs.values()))
+        # self.decoder = nn.ModuleList(list(self.convs.values()))
         self.sigmoid = nn.Sigmoid()
 
     def nestConv(self, conv, high_feature, low_features):
@@ -156,11 +159,9 @@ class HRDepthDecoder(nn.Module):
 
             # add fSE block to decoder
             if index in self.attention_position:
-                # try:
                 features["X_"+index] = self.convs["X_" + index + "_attention"](
                     self.convs["X_{}{}_Conv_0".format(row+1, col-1)](features["X_{}{}".format(row+1, col-1)]), low_features)
-                # except RuntimeError as e:
-                #     raise Exception('Vsyo pizdanylos') from e
+                features["X_" + index] = self.van_blocks["X_" + index](features["X_" + index])
             elif index in self.non_attention_position:
                 conv = [self.convs["X_{}{}_Conv_0".format(row + 1, col - 1)],
                         self.convs["X_{}{}_Conv_1".format(row + 1, col - 1)]]
