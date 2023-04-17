@@ -71,7 +71,7 @@ class HRDepthDecoder(nn.Module):
     """
     Adopted from paper HR-Depth: https://github.com/shawLyu/HR-Depth/blob/main/networks/HR_Depth_Decoder.py
     """
-    def __init__(self, num_ch_enc, scales=range(4), num_output_channels=1):
+    def __init__(self, num_ch_enc, scales=range(4), num_output_channels=1, use_super_res=True):
         super(HRDepthDecoder, self).__init__()
 
         self.num_output_channels = num_output_channels
@@ -85,6 +85,8 @@ class HRDepthDecoder(nn.Module):
 
         self.convs = nn.ModuleDict()
         self.van_blocks = nn.ModuleDict()
+        self.upscaler = SuperResBlock(16) if use_super_res else upsample
+
         for j in range(5):
             for i in range(5 - j):
                 # upconv 0
@@ -110,8 +112,8 @@ class HRDepthDecoder(nn.Module):
             fse_out_ch = fse_high_ch if index == "04" else self.num_ch_enc[row]
             van_depths = 2 if index == "22" else 1
 
-            self.convs["X_" + index + "_attention"] = fSEModule(fse_high_ch, fse_low_ch, fse_out_ch)
-            self.van_blocks["X_" + index] = VAN_Block(num_ch=fse_out_ch, depth=van_depths, mlp_ratio=4)
+            self.convs["X_" + index + "_attention"] = fSEModule(fse_high_ch, fse_low_ch, fse_out_ch, use_super_res)
+            # self.van_blocks["X_" + index] = VAN_Block(num_ch=fse_out_ch, depth=van_depths, mlp_ratio=4)
 
         for index in self.non_attention_position:
             row = int(index[0])
@@ -161,7 +163,7 @@ class HRDepthDecoder(nn.Module):
             if index in self.attention_position:
                 features["X_"+index] = self.convs["X_" + index + "_attention"](
                     self.convs["X_{}{}_Conv_0".format(row+1, col-1)](features["X_{}{}".format(row+1, col-1)]), low_features)
-                features["X_" + index] = self.van_blocks["X_" + index](features["X_" + index])
+                # features["X_" + index] = self.van_blocks["X_" + index](features["X_" + index])
             elif index in self.non_attention_position:
                 conv = [self.convs["X_{}{}_Conv_0".format(row + 1, col - 1)],
                         self.convs["X_{}{}_Conv_1".format(row + 1, col - 1)]]
@@ -171,7 +173,7 @@ class HRDepthDecoder(nn.Module):
 
         x = features["X_04"]
         x = self.convs["X_04_Conv_0"](x)
-        x = self.convs["X_04_Conv_1"](upsample(x))
+        x = self.convs["X_04_Conv_1"](self.upscaler(x))  # shape before upsample - (16, H / 2, W / 2)
         outputs[('disp', 0)] = self.sigmoid(self.convs["dispConvScale0"](x))  # (16, 1)
         outputs[('disp', 1)] = self.sigmoid(self.convs["dispConvScale1"](features["X_04"]))  # (32, 1)
         outputs[('disp', 2)] = self.sigmoid(self.convs["dispConvScale2"](features["X_13"]))  # (64, 1)

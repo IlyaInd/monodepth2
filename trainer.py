@@ -54,7 +54,8 @@ class Trainer:
         self.models["encoder"].to(self.device)
         self.parameters_to_train += list(self.models["encoder"].parameters())
 
-        self.models["depth"] = networks.depth_decoder.HRDepthDecoder(num_ch_enc=[64, 64, 128, 320, 512])
+        self.models["depth"] = networks.depth_decoder.HRDepthDecoder(num_ch_enc=[64, 64, 128, 320, 512],
+                                                                     use_super_res=True)
         # self.models["depth"] = networks.depth_decoder.VAN_decoder(mlp_ratios=(4, 4, 4, 4), depths=(2, 2, 3, 2))
         self.models["depth"].to(self.device)
         self.parameters_to_train += list(self.models["depth"].parameters())

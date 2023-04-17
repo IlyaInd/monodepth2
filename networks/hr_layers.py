@@ -7,6 +7,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from layers import SuperResBlock
+
 
 def upsample(x):
     """Upsample input tensor by a factor of 2
@@ -472,7 +474,7 @@ class Attention_Module(nn.Module):
         return self.relu(self.conv_se(features))
 
 class fSEModule(nn.Module):
-    def __init__(self, high_feature_channel, low_feature_channels, output_channel=None):
+    def __init__(self, high_feature_channel, low_feature_channels, output_channel=None, use_super_res=True):
         super(fSEModule, self).__init__()
         in_channel = high_feature_channel + low_feature_channels
         out_channel = high_feature_channel
@@ -481,6 +483,7 @@ class fSEModule(nn.Module):
         reduction = 16
         channel = in_channel
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.upscaler = SuperResBlock(high_feature_channel) if use_super_res else upsample
 
         self.fc = nn.Sequential(
             nn.Linear(channel, channel // reduction, bias=False),
@@ -494,7 +497,7 @@ class fSEModule(nn.Module):
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, high_features, low_features):
-        features = [upsample(high_features)]
+        features = [self.upscaler(high_features)]
         features += low_features
         features = torch.cat(features, 1)
 
