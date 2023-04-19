@@ -115,12 +115,10 @@ def load_weights(model, weights_path):
         del checkpoint["state_dict"]["head.weight"]
         del checkpoint["state_dict"]["head.bias"]
     model.load_state_dict(checkpoint["state_dict"], strict=strict)
-    print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
     if device == 'cpu':
         model = revert_sync_batchnorm(model)
     del checkpoint
     gc.collect()
-    print(f'CUDA memory allocated --- {torch.cuda.memory_allocated() / 1024 // 1024} MB')
     return model
 
 
@@ -141,7 +139,8 @@ class MultiHeadAttentionBlock(nn.Module):
 
 
 class VAN_encoder(nn.Module):
-    def __init__(self, zero_layer_mlp_ratio=4, zero_layer_depths=3):
+    def __init__(self, zero_layer_mlp_ratio=4, zero_layer_depths=3, pretrained=True,
+                 path_to_weights='networks/van_base_828.pth.tar'):
         super().__init__()
         self.register_buffer('imagenet_mean', torch.Tensor([0.485, 0.456, 0.406]))
         self.register_buffer('imagenet_std', torch.Tensor([0.229, 0.224, 0.225]))
@@ -151,10 +150,15 @@ class VAN_encoder(nn.Module):
         #     nn.BatchNorm2d(64),
         #     nn.Conv2d(64, 64, kernel_size=(3, 3), padding=1)
         # )
-        van = VAN(embed_dims=[64, 128, 320, 512],  mlp_ratios=[8, 8, 4, 4], depths=[3, 3, 12, 3])
+        van = VAN(embed_dims=[64, 128, 320, 512],  mlp_ratios=[8, 8, 4, 4],
+                  # depths=[3, 3, 12, 3],
+                  depths=[2, 2, 4, 2]
+                  )
         self.zero_layer = ZeroVANlayer(mlp_ratio=zero_layer_mlp_ratio, depths=zero_layer_depths)
-        self.van = load_weights(van, 'networks/van_base_828.pth.tar')
-        self.mha_block = MultiHeadAttentionBlock(self.num_ch_enc[-1], 6, 20, nhead=8)
+        if pretrained:
+            van = load_weights(van, path_to_weights)
+        self.van = van
+        # self.mha_block = MultiHeadAttentionBlock(self.num_ch_enc[-1], 6, 20, nhead=8)
 
     def forward(self, x):
         x = (x - self.imagenet_mean[None, :, None, None]) / self.imagenet_std[None, :, None, None]
@@ -162,5 +166,5 @@ class VAN_encoder(nn.Module):
         out = [self.zero_layer(x)]
         van_out = self.van(x)
         out.extend(van_out)
-        out[-1] += self.mha_block(out[-1])
+        # out[-1] += self.mha_block(out[-1])
         return out

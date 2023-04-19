@@ -247,6 +247,34 @@ class VAN(BaseModule):
         return outs
 
 
+class VAN_Block(VAN):
+    """Input and output of shape (B, C, H, W)"""
+    def __init__(self,
+                 num_ch: int,
+                 depth=3,
+                 mlp_ratio=4
+                 ):
+        super(VAN, self).__init__()
+        self.block = nn.ModuleList([Block(dim=num_ch,
+                                          mlp_ratio=mlp_ratio,
+                                          drop=0,
+                                          drop_path=0,
+                                          linear=False,
+                                          norm_cfg=dict(type='BN', requires_grad=True))
+                                    for j in range(depth)])
+
+        self.norm = nn.LayerNorm(num_ch)
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        x = x.flatten(2).permute(0, 2, 1)  # [B, N, C]
+        for blk in self.block:
+            x = blk(x, H, W)
+        x = self.norm(x)
+        x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+        return x
+
+
 class DWConv(nn.Module):
     def __init__(self, dim=768):
         super(DWConv, self).__init__()

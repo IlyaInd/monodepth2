@@ -88,7 +88,7 @@ class MonodepthOptions:
                                  type=str,
                                  help="learning rate scheduler type",
                                  default="step",
-                                 choices=["step", "cyclic"])
+                                 choices=["step", "one_cycle", "cyclic"])
         self.parser.add_argument("--lr_final_div_factor",
                                  type=float,
                                  help="final_div_factor param for cyclic lr scheduler",
@@ -97,6 +97,10 @@ class MonodepthOptions:
                                  type=int,
                                  help="batch size",
                                  default=12)
+        self.parser.add_argument("--grad_accumulation_steps",
+                                 type=int,
+                                 help="number of mini-batch to accumulate grads before optimizer step",
+                                 default=1)
         self.parser.add_argument("--learning_rate",
                                  type=float,
                                  help="learning rate",

@@ -59,15 +59,20 @@ class Trainer:
 
         # self.models["encoder"] = networks.ResnetEncoder(
         #     self.opt.num_layers, self.opt.weights_init == "pretrained")
-        self.models["encoder"] = networks.resnet_encoder.VAN_encoder(zero_layer_mlp_ratio=4, zero_layer_depths=3)
+        self.models["encoder"] = networks.resnet_encoder.VAN_encoder(4, 2, True, 'networks/van_small_811.pth.tar')
         self.models["encoder"].to(self.device)
         ddp_encoder = DDP(self.models["encoder"], device_ids=[LOCAL_RANK], output_device=LOCAL_RANK)
-        self.parameters_to_train += list(ddp_encoder.parameters())
+        self.parameters_to_train.append({'params': ddp_encoder.module.van.parameters(),
+                                         'lr': self.opt.learning_rate / 10})
+        self.parameters_to_train.append({'params': ddp_encoder.module.zero_layer.parameters(),
+                                         'lr': self.opt.learning_rate / 2.5})
 
-        self.models["depth"] = networks.DepthDecoder(self.models["encoder"].num_ch_enc, self.opt.scales)
+        self.models["depth"] = networks.depth_decoder.HRDepthDecoder(num_ch_enc=[64, 64, 128, 320, 512],
+                                                                     use_super_res=True)
+        #self.models["depth"] = networks.depth_decoder.VAN_decoder(mlp_ratios=(4, 4, 4, 4), depths=(2, 2, 3, 2))
         self.models["depth"].to(self.device)
         ddp_depth = DDP(self.models["depth"], device_ids=[LOCAL_RANK], output_device=LOCAL_RANK)
-        self.parameters_to_train += list(ddp_depth.parameters())
+        self.parameters_to_train.append({'params': ddp_depth.parameters()})
 
         if self.use_pose_net:
             if self.opt.pose_model_type == "separate_resnet":
@@ -78,7 +83,7 @@ class Trainer:
 
                 self.models["pose_encoder"].to(self.device)
                 ddp_pose_encoder = DDP(self.models["pose_encoder"], device_ids=[LOCAL_RANK], output_device=LOCAL_RANK)
-                self.parameters_to_train += list(ddp_pose_encoder.parameters())
+                self.parameters_to_train.append({'params': ddp_pose_encoder.parameters()})
 
                 self.models["pose"] = networks.PoseDecoder(
                     self.models["pose_encoder"].num_ch_enc,
@@ -95,7 +100,7 @@ class Trainer:
 
             self.models["pose"].to(self.device)
             ddp_pose = DDP(self.models["pose"], device_ids=[LOCAL_RANK], output_device=LOCAL_RANK)
-            self.parameters_to_train += list(ddp_pose.parameters())
+            self.parameters_to_train.append({'params': ddp_pose.parameters()})
 
         if self.opt.predictive_mask:
             assert self.opt.disable_automasking, \
@@ -137,18 +142,31 @@ class Trainer:
         print(f'TOTAL STEPS = {self.num_total_steps}')
 
         if self.opt.scheduler == 'step':
-            self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size, 0.1)
-        elif self.opt.scheduler == 'cyclic':
+            self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size,
+                                                                self.opt.lr_final_div_factor)
+        elif self.opt.scheduler == 'one_cycle':
+            lr = self.opt.learning_rate
+            max_lr_per_group = [lr / 10, lr / 2.5, lr, lr, lr]
             self.model_lr_scheduler = optim.lr_scheduler.OneCycleLR(self.model_optimizer,
                                                                     final_div_factor=self.opt.lr_final_div_factor,
                                                                     pct_start=0.05, div_factor=100,
-                                                                    max_lr=self.opt.learning_rate,
+                                                                    max_lr=max_lr_per_group,
                                                                     anneal_strategy='cos', verbose=False,
                                                                     total_steps=self.num_total_steps)
+        elif self.opt.scheduler == 'cyclic':  # TODO: adopt to use with params group
+            min_lr = self.opt.learning_rate / self.opt.lr_final_div_factor
+            one_epoch_length = self.num_total_steps // self.opt.num_epochs
+            self.model_lr_scheduler = optim.lr_scheduler.CyclicLR(self.model_optimizer, cycle_momentum=False,
+                                                                  base_lr=min_lr, max_lr=self.opt.learning_rate,
+                                                                  step_size_up=one_epoch_length * 1,
+                                                                  mode='triangular', verbose=False)
         train_dataset = self.dataset(
             self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 4, is_train=True, img_ext=img_ext)
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+
+        self.accumulation_steps = self.opt.grad_accumulation_steps
+        self.val_batch_size_ratio = 12
         self.train_loader = DataLoader(
             train_dataset, self.opt.batch_size, shuffle=False,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True, sampler=train_sampler)
@@ -225,9 +243,17 @@ class Trainer:
             before_op_time = time.time()
             outputs, losses = self.process_batch(inputs)
 
-            self.model_optimizer.zero_grad()
-            losses["loss"].backward()
-            self.model_optimizer.step()
+            if self.accumulation_steps > 1:
+                losses_norm = {k: v / self.accumulation_steps for k, v in losses.items()}
+                losses_norm["loss"].backward()
+
+                if (batch_idx + 1) % self.accumulation_steps == 0 or batch_idx + 1 == len(self.train_loader):
+                    self.model_optimizer.step()
+                    self.model_optimizer.zero_grad()
+            else:
+                self.model_optimizer.zero_grad()
+                losses["loss"].backward()
+                self.model_optimizer.step()
 
             duration = time.time() - before_op_time
 
@@ -247,8 +273,8 @@ class Trainer:
                     self.val()
 
             if LOCAL_RANK == 0:
-                wandb.log({'learning_rate': self.model_lr_scheduler.get_last_lr()[0]}, step=self.step)
-            if self.opt.scheduler == 'cyclic':
+                wandb.log({'learning_rate': max(self.model_lr_scheduler.get_last_lr())}, step=self.step)  # max along groups
+            if self.opt.scheduler == 'one_cycle' or self.opt.scheduler == 'cyclic':
                 self.model_lr_scheduler.step()
 
             self.step += 1
@@ -259,6 +285,7 @@ class Trainer:
     def process_batch(self, inputs):
         """Pass a minibatch through the network and generate images and losses
         """
+        #torch.cuda.reset_peak_memory_stats()
         for key, ipt in inputs.items():
             inputs[key] = ipt.to(self.device)
 
@@ -287,6 +314,7 @@ class Trainer:
 
         self.generate_images_pred(inputs, outputs)
         losses = self.compute_losses(inputs, outputs)
+        #print(f"CUDA MAX_MEMORY_ALLOCATED = {round(torch.cuda.max_memory_allocated() / 1024 ** 3, 2)} GB")
 
         return outputs, losses
 
@@ -352,22 +380,26 @@ class Trainer:
         """Validate the model on a single minibatch
         """
         self.set_eval()
-        try:
-            inputs = next(self.val_iter)
-        except StopIteration:
-            self.val_iter = iter(self.val_loader)
-            inputs = next(self.val_iter)
+        losses_total = []
+        for i in range(self.val_batch_size_ratio):
+            try:
+                inputs = next(self.val_iter)
+            except StopIteration:
+                self.val_iter = iter(self.val_loader)
+                inputs = next(self.val_iter)
 
-        with torch.no_grad():
-            outputs, losses = self.process_batch(inputs)
+            with torch.no_grad():
+                outputs, losses = self.process_batch(inputs)
 
-            if "depth_gt" in inputs:
-                self.compute_depth_losses(inputs, outputs, losses)
+                if "depth_gt" in inputs:
+                    self.compute_depth_losses(inputs, outputs, losses)
+            losses_total.append(losses)
 
-            # self.log("val", inputs, outputs, losses)
-            if LOCAL_RANK == 0:
-                wandb.log({'val_' + key: val for key, val in losses.items()}, step=self.step)
-            del inputs, outputs, losses
+        # Convert list of dicts to dict of lists and then get mean of each list
+        losses_total = {k: np.mean([dic[k].item() for dic in losses_total]) for k in losses_total[0]}
+        if LOCAL_RANK == 0:
+                wandb.log({'val_' + key: val for key, val in losses_total.items()}, step=self.step)
+        del inputs, outputs, losses
 
         self.set_train()
 

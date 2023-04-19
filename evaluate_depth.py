@@ -3,6 +3,9 @@ from __future__ import absolute_import, division, print_function
 import os
 import cv2
 import numpy as np
+import warnings
+warnings.filterwarnings('ignore', module='mmcv')
+warnings.filterwarnings('ignore', module='torchvision')
 
 import torch
 from torch.utils.data import DataLoader
@@ -86,14 +89,16 @@ def evaluate(opt):
         dataset = datasets.KITTIRAWDataset(opt.data_path, filenames,
                                            encoder_dict['height'], encoder_dict['width'],
                                            [0], 4, is_train=False, img_ext=img_ext)
-        dataloader = DataLoader(dataset, 16, shuffle=False, num_workers=opt.num_workers,
+        dataloader = DataLoader(dataset, 64, shuffle=False, num_workers=opt.num_workers,
                                 pin_memory=True, drop_last=False)
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # encoder = networks.ResnetEncoder(opt.num_layers, False)
-        encoder = networks.resnet_encoder.VAN_encoder(zero_layer_mlp_ratio=4, zero_layer_depths=3)
-        depth_decoder = networks.DepthDecoder(encoder.num_ch_enc)
+        encoder = networks.resnet_encoder.VAN_encoder(zero_layer_mlp_ratio=4, zero_layer_depths=2,  pretrained=False)
+        # depth_decoder = networks.DepthDecoder(encoder.num_ch_enc)
+        depth_decoder = networks.depth_decoder.HRDepthDecoder(num_ch_enc=[64, 64, 128, 320, 512], use_super_res=True)
+        # depth_decoder = networks.depth_decoder.VAN_decoder(mlp_ratios=(4, 4, 4, 4), depths=(2, 2, 3, 2))
         model_dict = encoder.state_dict()
         encoder.load_state_dict({k: v for k, v in encoder_dict.items() if k in model_dict})
         depth_decoder.load_state_dict(torch.load(decoder_path))

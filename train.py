@@ -7,6 +7,7 @@
 from __future__ import absolute_import, division, print_function
 import warnings
 warnings.filterwarnings('ignore', module='mmcv')
+warnings.filterwarnings('ignore', module='torchvision')
 
 from trainer import Trainer
 from options import MonodepthOptions
