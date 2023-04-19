@@ -52,13 +52,16 @@ class Trainer:
         #     self.opt.num_layers, self.opt.weights_init == "pretrained")
         self.models["encoder"] = networks.resnet_encoder.VAN_encoder(4, 2, True, 'networks/van_small_811.pth.tar')
         self.models["encoder"].to(self.device)
-        self.parameters_to_train += list(self.models["encoder"].parameters())
+        self.parameters_to_train.append({'params': self.models["encoder"].van.parameters(),
+                                         'lr': self.opt.learning_rate / 10})
+        self.parameters_to_train.append({'params': self.models["encoder"].zero_layer.parameters(),
+                                         'lr': self.opt.learning_rate / 2.5})
 
         self.models["depth"] = networks.depth_decoder.HRDepthDecoder(num_ch_enc=[64, 64, 128, 320, 512],
                                                                      use_super_res=True)
         # self.models["depth"] = networks.depth_decoder.VAN_decoder(mlp_ratios=(4, 4, 4, 4), depths=(2, 2, 3, 2))
         self.models["depth"].to(self.device)
-        self.parameters_to_train += list(self.models["depth"].parameters())
+        self.parameters_to_train.append({'params': self.models["depth"].parameters()})
 
         if self.use_pose_net:
             if self.opt.pose_model_type == "separate_resnet":
@@ -68,7 +71,7 @@ class Trainer:
                     num_input_images=self.num_pose_frames)
 
                 self.models["pose_encoder"].to(self.device)
-                self.parameters_to_train += list(self.models["pose_encoder"].parameters())
+                self.parameters_to_train.append({'params': self.models["pose_encoder"].parameters()})
 
                 self.models["pose"] = networks.PoseDecoder(
                     self.models["pose_encoder"].num_ch_enc,
@@ -84,7 +87,7 @@ class Trainer:
                     self.num_input_frames if self.opt.pose_model_input == "all" else 2)
 
             self.models["pose"].to(self.device)
-            self.parameters_to_train += list(self.models["pose"].parameters())
+            self.parameters_to_train.append({'params': self.models["pose"].parameters()})
 
         if self.opt.predictive_mask:
             assert self.opt.disable_automasking, \
@@ -126,13 +129,15 @@ class Trainer:
             self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size,
                                                                 self.opt.lr_final_div_factor)
         elif self.opt.scheduler == 'one_cycle':
+            lr = self.opt.learning_rate
+            max_lr_per_group = [lr / 10, lr / 2.5, lr, lr, lr]
             self.model_lr_scheduler = optim.lr_scheduler.OneCycleLR(self.model_optimizer,
                                                                     final_div_factor=self.opt.lr_final_div_factor,
                                                                     pct_start=0.05, div_factor=100,
-                                                                    max_lr=self.opt.learning_rate,
+                                                                    max_lr=max_lr_per_group,
                                                                     anneal_strategy='cos', verbose=False,
                                                                     total_steps=self.num_total_steps)
-        elif self.opt.scheduler == 'cyclic':
+        elif self.opt.scheduler == 'cyclic':  # TODO: adopt to use with params group
             min_lr = self.opt.learning_rate / self.opt.lr_final_div_factor
             one_epoch_length = self.num_total_steps // self.opt.num_epochs
             self.model_lr_scheduler = optim.lr_scheduler.CyclicLR(self.model_optimizer, cycle_momentum=False,
@@ -247,7 +252,7 @@ class Trainer:
                 wandb.log({'train_' + key: val for key, val in losses.items()}, step=self.step)
                 self.val()
 
-            wandb.log({'learning_rate': self.model_lr_scheduler.get_last_lr()[0]}, step=self.step)
+            wandb.log({'learning_rate': max(self.model_lr_scheduler.get_last_lr())}, step=self.step)  # max along groups
             if self.opt.scheduler == 'one_cycle' or self.opt.scheduler == 'cyclic':
                 self.model_lr_scheduler.step()
 
