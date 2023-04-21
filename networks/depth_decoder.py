@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 
 from collections import OrderedDict
-from .van import VAN, Block, VAN_Block
+from .van import VAN, Block, VAN_Block, SuperResBlock
 from .hr_layers import ConvBlock, fSEModule, Conv3x3, Conv1x1, upsample, ConvBlockSELU
 from layers import *
 from .hr_layers_diffnet import Attention_Module

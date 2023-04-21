@@ -188,6 +188,16 @@ class Trainer:
 
         self.save_opts()
 
+    @staticmethod
+    def track_grad_norm(model):
+        total_norm = 0
+        parameters = [p for p in model.parameters() if p.grad is not None and p.requires_grad]
+        for p in parameters:
+            param_norm = p.grad.detach().data.norm(2)
+            total_norm += param_norm.item() ** 2
+        total_norm = total_norm ** 0.5
+        return total_norm
+
     def set_train(self):
         """Convert all models to training mode
         """
@@ -253,6 +263,7 @@ class Trainer:
                 self.val()
 
             wandb.log({'learning_rate': max(self.model_lr_scheduler.get_last_lr())}, step=self.step)  # max along groups
+            wandb.log({'grad_norm/' + k: self.track_grad_norm(self.models[k]) for k in self.models.keys()})
             if self.opt.scheduler == 'one_cycle' or self.opt.scheduler == 'cyclic':
                 self.model_lr_scheduler.step()
 
