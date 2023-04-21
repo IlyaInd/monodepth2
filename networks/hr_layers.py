@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .van import SuperResBlock
+from .van import AttentionModule as LKA
 
 
 def upsample(x):
@@ -173,7 +174,7 @@ class Conv3x3(nn.Module):
 
 class Conv1x1(nn.Module):
     def __init__(self, in_channels, out_channels):
-        super(Conv1x1, self).__init__()
+        super().__init__()
 
         self.conv = nn.Conv2d(in_channels, out_channels, 1, stride=1, bias=False)
 
@@ -475,7 +476,7 @@ class Attention_Module(nn.Module):
 
 class fSEModule(nn.Module):
     def __init__(self, high_feature_channel, low_feature_channels, output_channel=None, use_super_res=True):
-        super(fSEModule, self).__init__()
+        super().__init__()
         in_channel = high_feature_channel + low_feature_channels
         out_channel = high_feature_channel
         if output_channel is not None:
@@ -484,6 +485,9 @@ class fSEModule(nn.Module):
         channel = in_channel
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         self.upscaler = SuperResBlock(high_feature_channel) if use_super_res else upsample
+        self.lka = LKA(channel)
+        self.lka_conv_1 = nn.Conv2d(channel, channel, 1)
+        self.lka_conv_2 = nn.Conv2d(channel, channel, 1)
 
         self.fc = nn.Sequential(
             nn.Linear(channel, channel // reduction, bias=False),
@@ -495,11 +499,13 @@ class fSEModule(nn.Module):
 
         self.conv_se = nn.Conv2d(in_channels=in_channel, out_channels=out_channel, kernel_size=1, stride=1)
         self.relu = nn.ReLU(inplace=True)
+        self.lka_activation = nn.Mish()
 
     def forward(self, high_features, low_features):
         features = [self.upscaler(high_features)]
         features += low_features
         features = torch.cat(features, 1)
+        features = self.lka_conv_2(self.lka(self.lka_activation(self.lka_conv_1(features)))) + features
 
         b, c, _, _ = features.size()
         y = self.avg_pool(features).view(b, c)

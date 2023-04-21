@@ -263,7 +263,8 @@ class Trainer:
                 self.val()
 
             wandb.log({'learning_rate': max(self.model_lr_scheduler.get_last_lr())}, step=self.step)  # max along groups
-            wandb.log({'grad_norm/' + k: self.track_grad_norm(self.models[k]) for k in self.models.keys()})
+            if self.step % 10 == 0:
+                wandb.log({'grad_norm/' + k: self.track_grad_norm(self.models[k]) for k in self.models.keys()})
             if self.opt.scheduler == 'one_cycle' or self.opt.scheduler == 'cyclic':
                 self.model_lr_scheduler.step()
 
