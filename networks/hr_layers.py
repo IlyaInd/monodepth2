@@ -135,11 +135,23 @@ def rot_from_axisangle(vec):
     return rot
 
 class ConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, convnext: bool):
+        super().__init__()
+        in_channels, out_channels = int(in_channels), int(out_channels)
+        if convnext:
+            self.convblock = ConvNeXtBlock(in_channels, out_channels)
+        else:
+            self.convblock = ConvBlockClassic(in_channels, out_channels)
+
+    def forward(self, x):
+        return self.convblock.forward(x)
+
+
+class ConvBlockClassic(nn.Module):
     """Layer to perform a convolution followed by ELU
     """
     def __init__(self, in_channels, out_channels):
-        super(ConvBlock, self).__init__()
-
+        super().__init__()
         self.conv = Conv3x3(in_channels, out_channels)
         self.nonlin = nn.ELU(inplace=True)
 
@@ -149,17 +161,45 @@ class ConvBlock(nn.Module):
         return out
 
 
-class ConvBlockSELU(ConvBlock):
+class ConvBlockSELU(ConvBlockClassic):
     def __init__(self, in_channels, out_channels):
         super().__init__(in_channels, out_channels)
         self.nonlin = nn.SELU(inplace=True)
+
+
+class ConvNeXtBlock(nn.Module):
+    def __init__(self, dim, out_dim, layer_scale_init_value=1e-6):
+        super().__init__()
+        self.dwconv = nn.Conv2d(dim, dim, kernel_size=7, padding=3, groups=dim)  # depth-wise conv
+        self.norm = nn.LayerNorm(dim, eps=1e-6)
+        self.pwconv1 = nn.Linear(dim, 2 * dim)  # point-wise/1x1 convs, implemented with linear layers
+        self.act = nn.GELU()
+        self.pwconv2 = nn.Linear(2 * dim, dim)
+        self.gamma = nn.Parameter(layer_scale_init_value * torch.ones((dim)),
+                                  requires_grad=True) if layer_scale_init_value > 0 else None
+        self.head = nn.Conv2d(dim, out_dim, kernel_size=1)
+
+    def forward(self, x):
+        input = x
+        x = self.dwconv(x)
+        x = x.permute(0, 2, 3, 1)  # (N, C, H, W) -> (N, H, W, C)
+        x = self.norm(x)
+        x = self.pwconv1(x)
+        x = self.act(x)
+        x = self.pwconv2(x)
+        if self.gamma is not None:
+            x = self.gamma * x
+        x = x.permute(0, 3, 1, 2)  # (N, H, W, C) -> (N, C, H, W)
+        x = input + x
+        x = self.head(x)
+        return x
 
 
 class Conv3x3(nn.Module):
     """Layer to pad and convolve input
     """
     def __init__(self, in_channels, out_channels, use_refl=True):
-        super(Conv3x3, self).__init__()
+        super().__init__()
 
         if use_refl:
             self.pad = nn.ReflectionPad2d(1)
