@@ -12,7 +12,7 @@ import torch.nn as nn
 
 from collections import OrderedDict
 from .van import VAN, Block, VAN_Block, SuperResBlock
-from .hr_layers import ConvBlock, ConvBlockSELU, fSEModule, Conv3x3, Conv1x1, upsample
+from .hr_layers import ConvBlock, ConvBlockSELU, fSEModule, Conv3x3, Conv1x1, upsample, VanFusionBlock
 from .hr_layers_diffnet import Attention_Module
 
 class DepthDecoder(nn.Module):
@@ -70,7 +70,7 @@ class HRDepthDecoder(nn.Module):
     """
     Adopted from paper HR-Depth: https://github.com/shawLyu/HR-Depth/blob/main/networks/HR_Depth_Decoder.py
     """
-    def __init__(self, num_ch_enc, scales=range(4), num_output_channels=1, use_super_res=True, convnext=True):
+    def __init__(self, num_ch_enc, scales=range(4), num_output_channels=1, use_super_res=True, convnext=False):
         super().__init__()
 
         self.num_output_channels = num_output_channels
@@ -112,6 +112,7 @@ class HRDepthDecoder(nn.Module):
             van_depths = 2 if index == "22" else 1
 
             self.convs["X_" + index + "_attention"] = fSEModule(fse_high_ch, fse_low_ch, fse_out_ch, use_super_res)
+            # self.convs["X_" + index + "_attention"] = VanFusionBlock(fse_high_ch, fse_low_ch, fse_out_ch, use_super_res)
             # self.van_blocks["X_" + index] = VAN_Block(num_ch=fse_out_ch, depth=van_depths, mlp_ratio=4)
 
         for index in self.non_attention_position:
@@ -129,7 +130,8 @@ class HRDepthDecoder(nn.Module):
                                                                                  self.num_ch_dec[row + 1], convnext)
 
         for i in range(4):
-            self.convs["dispConvScale{}".format(i)] = Conv3x3(self.num_ch_dec[i], self.num_output_channels)
+            # self.convs["dispConvScale{}".format(i)] = Conv3x3(self.num_ch_dec[i], self.num_output_channels)
+            self.convs["dispConvScale{}".format(i)] = ConvBlock(self.num_ch_dec[i], self.num_output_channels, convnext=True)
 
         # self.decoder = nn.ModuleList(list(self.convs.values()))
         self.sigmoid = nn.Sigmoid()

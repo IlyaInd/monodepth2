@@ -97,7 +97,8 @@ def evaluate(opt):
         # encoder = networks.ResnetEncoder(opt.num_layers, False)
         encoder = networks.resnet_encoder.VAN_encoder(zero_layer_mlp_ratio=4, zero_layer_depths=2,  pretrained=False)
         # depth_decoder = networks.DepthDecoder(encoder.num_ch_enc)
-        depth_decoder = networks.depth_decoder.HRDepthDecoder(num_ch_enc=[64, 64, 128, 320, 512], use_super_res=True)
+        depth_decoder = networks.depth_decoder.HRDepthDecoder(num_ch_enc=[64, 64, 128, 320, 512],
+                                                              use_super_res=True, convnext=False)
         # depth_decoder = networks.depth_decoder.VAN_decoder(mlp_ratios=(4, 4, 4, 4), depths=(2, 2, 3, 2))
         model_dict = encoder.state_dict()
         encoder.load_state_dict({k: v for k, v in encoder_dict.items() if k in model_dict})
@@ -230,7 +231,8 @@ def evaluate(opt):
 
     mean_errors = np.array(errors).mean(0)
 
-    latest_run_id = list(filter(lambda x: x[-6:] == '.wandb', os.listdir('wandb/latest-run')))[0][4:-6]
+    # latest_run_id = list(filter(lambda x: x[-6:] == '.wandb', os.listdir('wandb/latest-run')))[0][4:-6]
+    latest_run_id = ''
     print(f'Use latest wandb run to log summary: {latest_run_id}')
     api = wandb.Api()
     run = api.run(f"ilyaind/diploma/{latest_run_id}")

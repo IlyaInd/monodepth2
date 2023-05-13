@@ -37,9 +37,9 @@ class Trainer:
         self.parameters_to_train = []
 
         self.device = torch.device("cpu" if self.opt.no_cuda else "cuda")
-        self.lr_multipliers = OrderedDict({'van': 0.2,
+        self.lr_multipliers = OrderedDict({'van': 0.1,
                                            'zero_layer': 0.5,
-                                           'depth': 0.4,
+                                           'depth': 1.,
                                            'pose_encoder': 1.,
                                            'pose': 1.})
 
@@ -61,10 +61,11 @@ class Trainer:
         self.parameters_to_train.append({'params': self.models["encoder"].van.parameters(),
                                          'lr': self.opt.learning_rate * self.lr_multipliers['van']})
         self.parameters_to_train.append({'params': self.models["encoder"].zero_layer.parameters(),
+                                                   # list(self.models["encoder"].mha_block.parameters()),
                                          'lr': self.opt.learning_rate * self.lr_multipliers['zero_layer']})
 
         self.models["depth"] = networks.depth_decoder.HRDepthDecoder(num_ch_enc=[64, 64, 128, 320, 512],
-                                                                     use_super_res=True)
+                                                                     use_super_res=True, convnext=False)
         # self.models["depth"] = networks.depth_decoder.VAN_decoder(mlp_ratios=(4, 4, 4, 4), depths=(2, 2, 3, 2))
         self.models["depth"].to(self.device)
         self.parameters_to_train.append({'params': self.models["depth"].parameters(),
@@ -109,6 +110,7 @@ class Trainer:
             self.parameters_to_train += list(self.models["predictive_mask"].parameters())
 
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
+        # self.model_optimizer = optim.AdamW(self.parameters_to_train, self.opt.learning_rate, weight_decay=1e-4)
 
         if self.opt.load_weights_folder is not None:
             self.load_model()
@@ -172,6 +174,7 @@ class Trainer:
         wandb.init(project="diploma", entity="ilyaind", reinit=True)
         wandb.config['lr_multipliers'] = self.lr_multipliers
         wandb.config['base_learning_rate'] = self.opt.learning_rate
+        wandb.config['batch_size'] = self.opt.batch_size
 
         if not self.opt.no_ssim:
             self.ssim = SSIM()
@@ -278,7 +281,9 @@ class Trainer:
                 wandb.log({'grad_norm/' + k: self.track_grad_norm(self.models[k]) for k in self.models.keys()},
                       step=self.step)
             wandb.log({'grad_norm/van': self.track_grad_norm(self.models['encoder'].van),
-                       'grad_norm/zero_layer': self.track_grad_norm(self.models['encoder'].zero_layer)},
+                       'grad_norm/zero_layer': self.track_grad_norm(self.models['encoder'].zero_layer),
+                       # 'grad_norm/mha_block': self.track_grad_norm(self.models['encoder'].mha_block)
+                       },
                       step=self.step)
             if self.opt.scheduler == 'one_cycle' or self.opt.scheduler == 'cyclic':
                 self.model_lr_scheduler.step()

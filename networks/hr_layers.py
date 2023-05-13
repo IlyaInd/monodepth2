@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .van import SuperResBlock
+from .van import SuperResBlock, VAN_Block
 from .van import AttentionModule as LKA
 
 
@@ -515,43 +515,82 @@ class Attention_Module(nn.Module):
         return self.relu(self.conv_se(features))
 
 class fSEModule(nn.Module):
+    def __init__(self, high_feature_channel, low_feature_channels, output_channel=None, use_super_res=True, use_ca=False):
+        super().__init__()
+        in_channel = high_feature_channel + low_feature_channels
+        out_channel = high_feature_channel
+        if output_channel is not None:
+            out_channel = output_channel
+        channel = in_channel
+        self.upscaler = SuperResBlock(high_feature_channel) if use_super_res else upsample
+        self.use_channel_attention = use_ca
+        if use_ca:
+            reduction = 16
+            self.avg_pool = nn.AdaptiveAvgPool2d(1)
+            self.fc = nn.Sequential(
+                nn.Linear(channel, channel // reduction, bias=False),
+                nn.ReLU(inplace=True),
+                nn.Linear(channel // reduction, channel, bias=False)
+            )
+            self.sigmoid = nn.Sigmoid()
+            self.conv_se = nn.Conv2d(in_channels=in_channel, out_channels=out_channel, kernel_size=1, stride=1)
+            self.relu = nn.ReLU(inplace=True)
+        else:
+            self.norm = nn.BatchNorm2d(channel)
+            self.lka = LKA(channel)
+            self.lka_conv_1 = nn.Conv2d(channel, channel, 1)
+            self.lka_conv_2 = nn.Conv2d(channel, out_channel, 1)
+            self.lka_activation = nn.GELU()  # nn.Mish()
+
+    def forward(self, high_features, low_features):
+        features = [self.upscaler(high_features)]
+        features += low_features
+        features = torch.cat(features, 1)
+
+        if self.use_channel_attention:
+            b, c, _, _ = features.size()
+            y = self.avg_pool(features).view(b, c)
+            y = self.fc(y).view(b, c, 1, 1)
+            y = self.sigmoid(y)
+            features = features * y.expand_as(features)
+            features = self.relu(self.conv_se(features))
+        else:
+            # features = self.lka_conv_2(self.lka(self.lka_activation(self.lka_conv_1(features)))) + features
+            features = self.lka(self.lka_activation(self.lka_conv_1(self.norm(features)))) + features
+            features = self.lka_conv_2(features)
+        return features
+
+
+class VanFusionBlock(nn.Module):
     def __init__(self, high_feature_channel, low_feature_channels, output_channel=None, use_super_res=True):
         super().__init__()
         in_channel = high_feature_channel + low_feature_channels
         out_channel = high_feature_channel
         if output_channel is not None:
             out_channel = output_channel
-        reduction = 16
         channel = in_channel
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+
         self.upscaler = SuperResBlock(high_feature_channel) if use_super_res else upsample
-        self.lka = LKA(channel)
-        self.lka_conv_1 = nn.Conv2d(channel, channel, 1)
-        self.lka_conv_2 = nn.Conv2d(channel, channel, 1)
-
-        self.fc = nn.Sequential(
-            nn.Linear(channel, channel // reduction, bias=False),
-            nn.ReLU(inplace=True),
-            nn.Linear(channel // reduction, channel, bias=False)
-        )
-
-        self.sigmoid = nn.Sigmoid()
-
-        self.conv_se = nn.Conv2d(in_channels=in_channel, out_channels=out_channel, kernel_size=1, stride=1)
-        self.relu = nn.ReLU(inplace=True)
-        self.lka_activation = nn.Mish()
+        self.van_block = VAN_Block(channel, depth=1, mlp_ratio=4)
+        self.conv_head = nn.Conv2d(in_channels=in_channel, out_channels=out_channel, kernel_size=1, stride=1)
 
     def forward(self, high_features, low_features):
         features = [self.upscaler(high_features)]
         features += low_features
         features = torch.cat(features, 1)
-        features = self.lka_conv_2(self.lka(self.lka_activation(self.lka_conv_1(features)))) + features
 
-        b, c, _, _ = features.size()
-        y = self.avg_pool(features).view(b, c)
-        y = self.fc(y).view(b, c, 1, 1)
+        features = self.van_block(features)
+        features = self.conv_head(features)
+        return features
 
-        y = self.sigmoid(y)
-        features = features * y.expand_as(features)
 
-        return self.relu(self.conv_se(features))
+class ImageLayerNorm(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.norm = nn.LayerNorm(dim)
+
+    def forward(self, x):
+        x = x.permute(0, 2, 3, 1)  # (N, C, H, W) -> (N, H, W, C)
+        x = self.norm(x)
+        x = x.permute(0, 3, 1, 2)  # (N, H, W, C) -> (N, C, H, W)
+        return x
