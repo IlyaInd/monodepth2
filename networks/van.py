@@ -1,3 +1,5 @@
+import cv2
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -140,10 +142,24 @@ class OverlapPatchEmbed(nn.Module):
         return x, H, W
 
 
+def edge_detector_canny(img_tensor, thr_1=500, thr_2=150):
+    """Got 3-channels image tensor, return 6-channels tensor with Canny edges"""
+    device = img_tensor.device
+    img = np.uint8(img_tensor.detach().cpu().numpy() * 255)
+    edges_by_channel = []
+    for c in range(img.shape[0]):
+        edges = cv2.Canny(img[c], thr_1, thr_2)
+        edges_by_channel.append(edges / 255)
+    edges_by_channel = torch.Tensor(np.array(edges_by_channel)).to(device)
+    return torch.cat([img_tensor, edges_by_channel], dim=0)
+
+
 class ZeroVANlayer(nn.Module):
-    def __init__(self, mlp_ratio=4, depths=3):
+    def __init__(self, mlp_ratio=4, depths=3, use_edge_detector=True):
         super().__init__()
-        patch_embed = OverlapPatchEmbed(patch_size=7, stride=2, in_chans=3, embed_dim=64)
+        in_channels = 6 if use_edge_detector else 3
+        self.use_edge_detector = use_edge_detector
+        patch_embed = OverlapPatchEmbed(patch_size=7, stride=2, in_chans=in_channels, embed_dim=64)
         self.patch_embed = revert_sync_batchnorm(patch_embed)
         self.block = nn.ModuleList([Block(dim=64, mlp_ratio=mlp_ratio, drop=0, drop_path=0,
                                           linear=False, norm_cfg=dict(type='BN', requires_grad=True))
@@ -152,6 +168,8 @@ class ZeroVANlayer(nn.Module):
 
     def forward(self, x):
         B = x.shape[0]
+        if self.use_edge_detector:
+            x = torch.cat([edge_detector_canny(x[i]).unsqueeze(0) for i in range(B)], dim=0)
         x, H, W = self.patch_embed(x)
         for blk in self.block:
             x = blk(x, H, W)
