@@ -16,6 +16,7 @@ import torch.utils.model_zoo as model_zoo
 from timm.models.vision_transformer import _cfg
 from mmcv.cnn.utils import revert_sync_batchnorm
 
+from .hr_layers import ConvBlock, upsample
 from .van import VAN, ZeroVANlayer
 
 class ResNetMultiImageInput(models.ResNet):
@@ -166,5 +167,8 @@ class VAN_encoder(nn.Module):
         out = [self.zero_layer(x)]
         van_out = self.van(x)
         out.extend(van_out)
+        high_fused = self.zero_layer.fusion_conv_high(torch.cat([out[0], upsample(out[1])], dim=1))
+        low_fused = self.zero_layer.fusion_conv_low(torch.cat([self.zero_layer.downsample_conv(out[0]), out[1]], dim=1))
+        out[0], out[1] = high_fused, low_fused
         # out[-1] += self.mha_block(out[-1])
         return out
