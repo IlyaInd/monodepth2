@@ -13,7 +13,8 @@ import torch.nn as nn
 from collections import OrderedDict
 from .van import VAN, Block, VAN_Block
 from .hr_layers import ConvBlock, fSEModule, Conv3x3, Conv1x1, upsample, ConvBlockSELU
-from layers import *
+from .van import VAN, Block, VAN_Block, SuperResBlock
+from .hr_layers import ConvBlock, ConvBlockSELU, fSEModule, Conv3x3, Conv1x1, upsample, VanFusionBlock
 from .hr_layers_diffnet import Attention_Module
 
 class DepthDecoder(nn.Module):
@@ -71,8 +72,8 @@ class HRDepthDecoder(nn.Module):
     """
     Adopted from paper HR-Depth: https://github.com/shawLyu/HR-Depth/blob/main/networks/HR_Depth_Decoder.py
     """
-    def __init__(self, num_ch_enc, scales=range(4), num_output_channels=1, use_super_res=True):
-        super(HRDepthDecoder, self).__init__()
+    def __init__(self, num_ch_enc, scales=range(4), num_output_channels=1, use_super_res=True, convnext=False):
+        super().__init__()
 
         self.num_output_channels = num_output_channels
         self.num_ch_enc = num_ch_enc
@@ -94,13 +95,13 @@ class HRDepthDecoder(nn.Module):
                 if i == 0 and j != 0:
                     num_ch_in /= 2
                 num_ch_out = num_ch_in / 2
-                self.convs["X_{}{}_Conv_0".format(i, j)] = ConvBlock(num_ch_in, num_ch_out)
+                self.convs["X_{}{}_Conv_0".format(i, j)] = ConvBlock(num_ch_in, num_ch_out, convnext)
 
                 # X_04 upconv 1, only add X_04 convolution
                 if i == 0 and j == 4:
                     num_ch_in = num_ch_out
                     num_ch_out = self.num_ch_dec[i]
-                    self.convs["X_{}{}_Conv_1".format(i, j)] = ConvBlock(num_ch_in, num_ch_out)
+                    self.convs["X_{}{}_Conv_1".format(i, j)] = ConvBlock(num_ch_in, num_ch_out, convnext)
 
         # declare fSEModule and original module
         for index in self.attention_position:
@@ -113,6 +114,7 @@ class HRDepthDecoder(nn.Module):
             van_depths = 2 if index == "22" else 1
 
             self.convs["X_" + index + "_attention"] = fSEModule(fse_high_ch, fse_low_ch, fse_out_ch, use_super_res)
+            # self.convs["X_" + index + "_attention"] = VanFusionBlock(fse_high_ch, fse_low_ch, fse_out_ch, use_super_res)
             # self.van_blocks["X_" + index] = VAN_Block(num_ch=fse_out_ch, depth=van_depths, mlp_ratio=4)
 
         for index in self.non_attention_position:
@@ -120,15 +122,18 @@ class HRDepthDecoder(nn.Module):
             col = int(index[1])
 
             if col == 1:
-                self.convs["X_{}{}_Conv_1".format(row + 1, col - 1)] = ConvBlock(num_ch_enc[row + 1] // 2 +
-                                                                                 self.num_ch_enc[row], self.num_ch_dec[row + 1])
+                self.convs["X_{}{}_Conv_1".format(row + 1, col - 1)] = ConvBlock(num_ch_enc[row + 1] // 2 + self.num_ch_enc[row],
+                                                                                 self.num_ch_dec[row + 1],
+                                                                                 convnext)
             else:
                 self.convs["X_"+index+"_downsample"] = Conv1x1(num_ch_enc[row+1] // 2 + self.num_ch_enc[row]
                                                                + self.num_ch_dec[row+1]*(col-1), self.num_ch_dec[row + 1] * 2)
-                self.convs["X_{}{}_Conv_1".format(row + 1, col - 1)] = ConvBlock(self.num_ch_dec[row + 1] * 2, self.num_ch_dec[row + 1])
+                self.convs["X_{}{}_Conv_1".format(row + 1, col - 1)] = ConvBlock(self.num_ch_dec[row + 1] * 2,
+                                                                                 self.num_ch_dec[row + 1], convnext)
 
         for i in range(4):
-            self.convs["dispConvScale{}".format(i)] = Conv3x3(self.num_ch_dec[i], self.num_output_channels)
+            # self.convs["dispConvScale{}".format(i)] = Conv3x3(self.num_ch_dec[i], self.num_output_channels)
+            self.convs["dispConvScale{}".format(i)] = ConvBlock(self.num_ch_dec[i], self.num_output_channels, convnext=True)
 
         # self.decoder = nn.ModuleList(list(self.convs.values()))
         self.sigmoid = nn.Sigmoid()

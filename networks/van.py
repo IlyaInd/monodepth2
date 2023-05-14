@@ -1,3 +1,5 @@
+import cv2
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -41,6 +43,7 @@ class Mlp(nn.Module):
 
 
 class AttentionModule(nn.Module):
+    """LKA - Large Kernel Attention"""
     def __init__(self, dim):
         super().__init__()
         self.conv0 = nn.Conv2d(dim, dim, 5, padding=2, groups=dim)
@@ -139,18 +142,38 @@ class OverlapPatchEmbed(nn.Module):
         return x, H, W
 
 
+def edge_detector_canny(img_tensor, thr_1=500, thr_2=150):
+    """Got 3-channels image tensor, return 6-channels tensor with Canny edges"""
+    device = img_tensor.device
+    img = np.uint8(img_tensor.detach().cpu().numpy() * 255)
+    edges_by_channel = []
+    for c in range(img.shape[0]):
+        edges = cv2.Canny(img[c], thr_1, thr_2)
+        edges_by_channel.append(edges / 255)
+    edges_by_channel = torch.Tensor(np.array(edges_by_channel)).to(device)
+    return torch.cat([img_tensor, edges_by_channel], dim=0)
+
+
 class ZeroVANlayer(nn.Module):
-    def __init__(self, mlp_ratio=4, depths=3):
+    def __init__(self, mlp_ratio=4, depths=3, use_edge_detector=True):
         super().__init__()
-        patch_embed = OverlapPatchEmbed(patch_size=7, stride=2, in_chans=3, embed_dim=64)
+        in_channels = 6 if use_edge_detector else 3
+        self.use_edge_detector = use_edge_detector
+        patch_embed = OverlapPatchEmbed(patch_size=7, stride=2, in_chans=in_channels, embed_dim=64)
         self.patch_embed = revert_sync_batchnorm(patch_embed)
         self.block = nn.ModuleList([Block(dim=64, mlp_ratio=mlp_ratio, drop=0, drop_path=0,
                                           linear=False, norm_cfg=dict(type='SyncBN', requires_grad=True))
                                     for j in range(depths)])
         self.norm = nn.LayerNorm(64)
+        self.fusion_conv_high = nn.Conv2d(128, 64, kernel_size=1)  # ConvBlock(128, 64, convnext=True)
+        self.fusion_conv_low = nn.Conv2d(128, 64, kernel_size=1)  # ConvBlock(128, 64, convnext=True)
+        self.downsample_conv = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, padding_mode='reflect', groups=1)
+
 
     def forward(self, x):
         B = x.shape[0]
+        if self.use_edge_detector:
+            x = torch.cat([edge_detector_canny(x[i]).unsqueeze(0) for i in range(B)], dim=0)
         x, H, W = self.patch_embed(x)
         for blk in self.block:
             x = blk(x, H, W)
@@ -283,3 +306,28 @@ class DWConv(nn.Module):
     def forward(self, x):
         x = self.dwconv(x)
         return x
+
+
+class SuperResBlock(nn.Module):
+    def __init__(self, num_ch, use_lka=True):
+        super().__init__()
+        self.num_ch = num_ch
+        self.use_lka = use_lka
+        if use_lka:
+            self.norm = nn.BatchNorm2d(num_ch)
+            self.conv_0 = nn.Conv2d(num_ch, num_ch, 1)
+            self.lka = AttentionModule(num_ch)
+        self.conv_1 = nn.Conv2d(num_ch, num_ch * 4, 5, stride=1, padding=2, padding_mode='reflect', groups=num_ch)
+        self.nonlin = nn.GELU()
+        self.conv_2 = nn.Conv2d(num_ch * 4, num_ch * 4, 5, stride=1, padding=2, padding_mode='reflect', groups=num_ch * 4)
+        self.pixel_shuffle = nn.PixelShuffle(2)
+        self.conv_head = nn.Conv2d(num_ch, num_ch, 7, stride=1, padding=3, padding_mode='reflect', groups=num_ch)
+
+    def forward(self, x):
+        x_out = self.lka(self.nonlin(self.conv_0(self.norm(x)))) + x if self.use_lka else x
+        x_out = self.nonlin(self.conv_1(x_out))
+        x_out = self.conv_2(x_out)
+        x_out = self.pixel_shuffle(x_out)
+        x_out = self.conv_head(x_out)
+        # x_out = x_out + nn.functional.interpolate(x, scale_factor=2, mode="nearest")
+        return x_out

@@ -7,6 +7,7 @@
 from __future__ import absolute_import, division, print_function
 
 import time
+from collections import OrderedDict
 
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -45,6 +46,11 @@ class Trainer:
         self.parameters_to_train = []
 
         self.device = torch.device("cuda:{}".format(LOCAL_RANK))
+        self.lr_multipliers = OrderedDict({'van': 0.1,
+                                           'zero_layer': 0.5,
+                                           'depth': 1.,
+                                           'pose_encoder': 1.,
+                                           'pose': 1.})
 
         self.num_scales = len(self.opt.scales)
         self.num_input_frames = len(self.opt.frame_ids)
@@ -63,16 +69,18 @@ class Trainer:
         self.models["encoder"].to(self.device)
         ddp_encoder = DDP(self.models["encoder"], device_ids=[LOCAL_RANK], output_device=LOCAL_RANK)
         self.parameters_to_train.append({'params': ddp_encoder.module.van.parameters(),
-                                         'lr': self.opt.learning_rate / 10})
+                                         'lr': self.opt.learning_rate * self.lr_multipliers['van']})
         self.parameters_to_train.append({'params': ddp_encoder.module.zero_layer.parameters(),
-                                         'lr': self.opt.learning_rate / 2.5})
+                                                   # list(self.models["encoder"].mha_block.parameters()),
+                                         'lr': self.opt.learning_rate * self.lr_multipliers['zero_layer']})
 
         self.models["depth"] = networks.depth_decoder.HRDepthDecoder(num_ch_enc=[64, 64, 128, 320, 512],
-                                                                     use_super_res=True)
-        #self.models["depth"] = networks.depth_decoder.VAN_decoder(mlp_ratios=(4, 4, 4, 4), depths=(2, 2, 3, 2))
+                                                                     use_super_res=True, convnext=False)
+        # self.models["depth"] = networks.depth_decoder.VAN_decoder(mlp_ratios=(4, 4, 4, 4), depths=(2, 2, 3, 2))
         self.models["depth"].to(self.device)
         ddp_depth = DDP(self.models["depth"], device_ids=[LOCAL_RANK], output_device=LOCAL_RANK)
-        self.parameters_to_train.append({'params': ddp_depth.parameters()})
+        self.parameters_to_train.append({'params': ddp_depth.parameters(),
+                                         'lr': self.opt.learning_rate * self.lr_multipliers['depth']})
 
         if self.use_pose_net:
             if self.opt.pose_model_type == "separate_resnet":
@@ -115,6 +123,7 @@ class Trainer:
             self.parameters_to_train += list(self.models["predictive_mask"].parameters())
 
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
+        # self.model_optimizer = optim.AdamW(self.parameters_to_train, self.opt.learning_rate, weight_decay=1e-4)
 
         if self.opt.load_weights_folder is not None:
             self.load_model()
@@ -144,9 +153,10 @@ class Trainer:
         if self.opt.scheduler == 'step':
             self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size,
                                                                 self.opt.lr_final_div_factor)
+            self.warmup_scheduler = torch.optim.lr_scheduler.LinearLR(self.model_optimizer, start_factor=0.01,
+                                                                      total_iters=num_train_samples // self.opt.batch_size)
         elif self.opt.scheduler == 'one_cycle':
-            lr = self.opt.learning_rate
-            max_lr_per_group = [lr / 10, lr / 2.5, lr, lr, lr]
+            max_lr_per_group = [self.opt.learning_rate * m for m in self.lr_multipliers.values()]
             self.model_lr_scheduler = optim.lr_scheduler.OneCycleLR(self.model_optimizer,
                                                                     final_div_factor=self.opt.lr_final_div_factor,
                                                                     pct_start=0.05, div_factor=100,
@@ -181,6 +191,9 @@ class Trainer:
 
         if LOCAL_RANK == 0:
             wandb.init(project="diploma", entity="ilyaind", reinit=True)
+        wandb.config['lr_multipliers'] = self.lr_multipliers
+        wandb.config['base_learning_rate'] = self.opt.learning_rate
+        wandb.config['batch_size'] = self.opt.batch_size
 
         if not self.opt.no_ssim:
             self.ssim = SSIM()
@@ -206,6 +219,16 @@ class Trainer:
                 len(train_dataset), len(val_dataset)))
 
             self.save_opts()
+
+    @staticmethod
+    def track_grad_norm(model):
+        total_norm = 0
+        parameters = [p for p in model.parameters() if p.grad is not None and p.requires_grad]
+        for p in parameters:
+            param_norm = p.grad.detach().data.norm(2)
+            total_norm += param_norm.item() ** 2
+        total_norm = total_norm ** 0.5
+        return total_norm
 
     def set_train(self):
         """Convert all models to training mode
@@ -272,10 +295,21 @@ class Trainer:
                     wandb.log({'train_' + key: val for key, val in losses.items()}, step=self.step)
                     self.val()
 
+            curr_lr_source = self.warmup_scheduler if self.opt.scheduler == 'step' else self.model_lr_scheduler
             if LOCAL_RANK == 0:
-                wandb.log({'learning_rate': max(self.model_lr_scheduler.get_last_lr())}, step=self.step)  # max along groups
+                wandb.log({'learning_rate': max(curr_lr_source.get_last_lr())}, step=self.step)  # max along groups
+                if self.step % 10 == 0:
+                    wandb.log({'grad_norm/' + k: self.track_grad_norm(self.models[k]) for k in self.models.keys()},
+                          step=self.step)
+                wandb.log({'grad_norm/van': self.track_grad_norm(self.models['encoder'].van),
+                           'grad_norm/zero_layer': self.track_grad_norm(self.models['encoder'].zero_layer),
+                           # 'grad_norm/mha_block': self.track_grad_norm(self.models['encoder'].mha_block)
+                           },
+                          step=self.step)
             if self.opt.scheduler == 'one_cycle' or self.opt.scheduler == 'cyclic':
                 self.model_lr_scheduler.step()
+            elif self.opt.scheduler == 'step':
+                self.warmup_scheduler.step()
 
             self.step += 1
 
@@ -398,7 +432,7 @@ class Trainer:
         # Convert list of dicts to dict of lists and then get mean of each list
         losses_total = {k: np.mean([dic[k].item() for dic in losses_total]) for k in losses_total[0]}
         if LOCAL_RANK == 0:
-                wandb.log({'val_' + key: val for key, val in losses_total.items()}, step=self.step)
+            wandb.log({'val_' + key: val for key, val in losses_total.items()}, step=self.step)
         del inputs, outputs, losses
 
         self.set_train()

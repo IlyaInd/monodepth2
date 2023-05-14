@@ -136,21 +136,6 @@ class Conv3x3(nn.Module):
         return out
 
 
-class SuperResBlock(nn.Module):
-    def __init__(self, num_ch):
-        super().__init__()
-        self.num_ch = num_ch
-        self.conv_1 = nn.Conv2d(num_ch, num_ch * 4, 5, stride=1, padding=2, padding_mode='reflect', groups=num_ch)
-        self.nonlin_1 = nn.GELU()
-        self.conv_2 = nn.Conv2d(num_ch * 4, num_ch * 4, 5, stride=1, padding=2, padding_mode='reflect', groups=num_ch * 4)
-        self.pixel_shuffle = nn.PixelShuffle(2)
-
-    def forward(self, x):
-        x_out = self.nonlin_1(self.conv_1(x))
-        x_out = self.conv_2(x_out)
-        x_out = self.pixel_shuffle(x_out)
-        return x_out
-
 
 class BackprojectDepth(nn.Module):
     """Layer to transform a depth image into a point cloud
