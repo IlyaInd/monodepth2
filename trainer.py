@@ -122,13 +122,16 @@ class Trainer:
             self.models["predictive_mask"].to(self.device)
             self.parameters_to_train += list(self.models["predictive_mask"].parameters())
 
-        self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
-        # self.model_optimizer = optim.AdamW(self.parameters_to_train, self.opt.learning_rate, weight_decay=1e-4)
+        if self.opt.weight_decay > 0:
+            self.model_optimizer = optim.AdamW(self.parameters_to_train, self.opt.learning_rate,
+                                               weight_decay=self.opt.weight_decay)
+        else:
+            self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
 
         if self.opt.load_weights_folder is not None:
             self.load_model()
 
-        if LOCAL_RANK == 0:
+        if WORLD_RANK == 0:
             print("Training model named:\n  ", self.opt.model_name)
             print("Models and tensorboard events files are saved to:\n  ", self.opt.log_dir)
         print("Training is using:\n  ", self.device)
@@ -154,7 +157,7 @@ class Trainer:
             self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size,
                                                                 self.opt.lr_final_div_factor)
             self.warmup_scheduler = torch.optim.lr_scheduler.LinearLR(self.model_optimizer, start_factor=0.01,
-                                                                      total_iters=num_train_samples // self.opt.batch_size)
+                                                                      total_iters=self.num_total_steps // self.opt.num_epochs)
         elif self.opt.scheduler == 'one_cycle':
             max_lr_per_group = [self.opt.learning_rate * m for m in self.lr_multipliers.values()]
             self.model_lr_scheduler = optim.lr_scheduler.OneCycleLR(self.model_optimizer,
@@ -189,11 +192,11 @@ class Trainer:
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True, sampler=val_sampler)
         self.val_iter = iter(self.val_loader)
 
-        if LOCAL_RANK == 0:
+        if WORLD_RANK == 0:
             wandb.init(project="diploma", entity="ilyaind", reinit=True)
-        wandb.config['lr_multipliers'] = self.lr_multipliers
-        wandb.config['base_learning_rate'] = self.opt.learning_rate
-        wandb.config['batch_size'] = self.opt.batch_size
+            wandb.config['lr_multipliers'] = self.lr_multipliers
+            wandb.config['base_learning_rate'] = self.opt.learning_rate
+            wandb.config['batch_size'] = self.opt.batch_size
 
         if not self.opt.no_ssim:
             self.ssim = SSIM()
@@ -213,7 +216,7 @@ class Trainer:
 
         self.depth_metric_names = [
             "de/abs_rel", "de/sq_rel", "de/rms", "de/log_rms", "da/a1", "da/a2", "da/a3"]
-        if LOCAL_RANK == 0:
+        if WORLD_RANK == 0:
             print("Using split:\n  ", self.opt.split)
             print("There are {:d} training items and {:d} validation items\n".format(
                 len(train_dataset), len(val_dataset)))
@@ -250,14 +253,14 @@ class Trainer:
         self.start_time = time.time()
         for self.epoch in range(self.opt.num_epochs):
             self.run_epoch()
-            if (self.epoch + 1) % self.opt.save_frequency == 0 and LOCAL_RANK == 0:
+            if (self.epoch + 1) % self.opt.save_frequency == 0 and WORLD_RANK == 0:
                 self.save_model()
 
     def run_epoch(self):
         """Run a single epoch of training and validation
         """
         # self.model_lr_scheduler.step()
-        if LOCAL_RANK == 0:
+        if WORLD_RANK == 0:
             print("Training")
         self.set_train()
 
@@ -291,12 +294,12 @@ class Trainer:
                     self.compute_depth_losses(inputs, outputs, losses)
 
                 # self.log("train", inputs, outputs, losses)
-                if LOCAL_RANK == 0:
+                if WORLD_RANK == 0:
                     wandb.log({'train_' + key: val for key, val in losses.items()}, step=self.step)
                     self.val()
 
             curr_lr_source = self.warmup_scheduler if self.opt.scheduler == 'step' else self.model_lr_scheduler
-            if LOCAL_RANK == 0:
+            if WORLD_RANK == 0:
                 wandb.log({'learning_rate': max(curr_lr_source.get_last_lr())}, step=self.step)  # max along groups
                 if self.step % 10 == 0:
                     wandb.log({'grad_norm/' + k: self.track_grad_norm(self.models[k]) for k in self.models.keys()},
@@ -431,7 +434,7 @@ class Trainer:
 
         # Convert list of dicts to dict of lists and then get mean of each list
         losses_total = {k: np.mean([dic[k].item() for dic in losses_total]) for k in losses_total[0]}
-        if LOCAL_RANK == 0:
+        if WORLD_RANK == 0:
             wandb.log({'val_' + key: val for key, val in losses_total.items()}, step=self.step)
         del inputs, outputs, losses
 
@@ -629,8 +632,8 @@ class Trainer:
         """
         samples_per_sec = self.opt.batch_size / duration
         time_sofar = time.time() - self.start_time
-        one_step_duration = time_sofar / (self.step + 1)
-        training_time_left = (self.num_total_steps - self.step) / one_step_duration if self.step > 0 else 0
+        training_time_left = (
+            self.num_total_steps / self.step - 1.0) * time_sofar if self.step > 0 else 0
         print_string = "epoch {:>3} | batch {:>6} | examples/s: {:5.1f}" + \
             " | loss: {:.5f} | time elapsed: {} | time left: {}"
         print(print_string.format(self.epoch, batch_idx, samples_per_sec, loss,
