@@ -113,6 +113,10 @@ class MonodepthOptions:
                                  type=int,
                                  help="step size of the scheduler",
                                  default=15)
+        self.parser.add_argument("--weight_decay",
+                                 type=float,
+                                 help="weight decay to use with AdamW",
+                                 default=0)
 
         # ABLATION options
         self.parser.add_argument("--v1_multiscale",

@@ -109,8 +109,11 @@ class Trainer:
             self.models["predictive_mask"].to(self.device)
             self.parameters_to_train += list(self.models["predictive_mask"].parameters())
 
-        self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
-        # self.model_optimizer = optim.AdamW(self.parameters_to_train, self.opt.learning_rate, weight_decay=1e-4)
+        if self.opt.weight_decay > 0:
+            self.model_optimizer = optim.AdamW(self.parameters_to_train, self.opt.learning_rate,
+                                               weight_decay=self.opt.weight_decay)
+        else:
+            self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate)
 
         if self.opt.load_weights_folder is not None:
             self.load_model()
