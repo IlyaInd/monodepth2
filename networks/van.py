@@ -87,7 +87,7 @@ class Block(nn.Module):
                  drop_path=0.,
                  act_layer=nn.GELU,
                  linear=False,
-                 norm_cfg=dict(type='SyncBN', requires_grad=True)):
+                 norm_cfg=dict(type='BN', requires_grad=True)):
         super().__init__()
         self.norm1 = build_norm_layer(norm_cfg, dim)[1]
         self.attn = SpatialAttention(dim)
@@ -124,7 +124,7 @@ class OverlapPatchEmbed(nn.Module):
                  stride=4,
                  in_chans=3,
                  embed_dim=768,
-                 norm_cfg=dict(type='SyncBN', requires_grad=True)):
+                 norm_cfg=dict(type='BN', requires_grad=True)):
         super().__init__()
         patch_size = to_2tuple(patch_size)
 
@@ -162,13 +162,13 @@ class ZeroVANlayer(nn.Module):
         patch_embed = OverlapPatchEmbed(patch_size=7, stride=2, in_chans=in_channels, embed_dim=64)
         self.patch_embed = revert_sync_batchnorm(patch_embed)
         self.block = nn.ModuleList([Block(dim=64, mlp_ratio=mlp_ratio, drop=0, drop_path=0,
-                                          linear=False, norm_cfg=dict(type='SyncBN', requires_grad=True))
+                                          linear=False, norm_cfg=dict(type='BN', requires_grad=True))
                                     for j in range(depths)])
         self.norm = nn.LayerNorm(64)
         self.fusion_conv_high = nn.Conv2d(128, 64, kernel_size=1)  # ConvBlock(128, 64, convnext=True)
         self.fusion_conv_low = nn.Conv2d(128, 64, kernel_size=1)  # ConvBlock(128, 64, convnext=True)
         self.downsample_conv = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, padding_mode='reflect', groups=1)
-
+        self.downsample_norm = nn.BatchNorm2d(64) #
 
     def forward(self, x):
         B = x.shape[0]
@@ -195,7 +195,7 @@ class VAN(BaseModule):
                  linear=False,
                  pretrained=None,
                  init_cfg=None,
-                 norm_cfg=dict(type='SyncBN', requires_grad=True)):
+                 norm_cfg=dict(type='BN', requires_grad=True)):
         super(VAN, self).__init__(init_cfg=init_cfg)
 
         assert not (init_cfg and pretrained), \

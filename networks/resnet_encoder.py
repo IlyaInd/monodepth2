@@ -168,7 +168,8 @@ class VAN_encoder(nn.Module):
         van_out = self.van(x)
         out.extend(van_out)
         high_fused = self.zero_layer.fusion_conv_high(torch.cat([out[0], upsample(out[1])], dim=1))
-        low_fused = self.zero_layer.fusion_conv_low(torch.cat([self.zero_layer.downsample_conv(out[0]), out[1]], dim=1))
+        low_fused = self.zero_layer.fusion_conv_low(
+            torch.cat([self.zero_layer.downsample_conv(self.zero_layer.downsample_norm(out[0])), out[1]], dim=1))
         out[0], out[1] = high_fused, low_fused
         # out[-1] += self.mha_block(out[-1])
         return out
