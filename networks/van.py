@@ -168,7 +168,7 @@ class ZeroVANlayer(nn.Module):
         self.fusion_conv_high = nn.Conv2d(128, 64, kernel_size=1)  # ConvBlock(128, 64, convnext=True)
         self.fusion_conv_low = nn.Conv2d(128, 64, kernel_size=1)  # ConvBlock(128, 64, convnext=True)
         self.downsample_conv = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, padding_mode='reflect', groups=1)
-
+        self.downsample_norm = nn.BatchNorm2d(64) #
 
     def forward(self, x):
         B = x.shape[0]
