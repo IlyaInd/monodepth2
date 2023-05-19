@@ -38,7 +38,7 @@ class Tester:
         print("-> Loading weights from {}".format(self.opt.load_weights_folder))
         print("\n  " + ("{:>8} | " * 8).format("epoch", "abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
         num_epochs = len(os.listdir(self.opt.load_weights_folder)) - 1  # exclude opt.json
-        for epoch in range(num_epochs - 1, num_epochs - 12, -1):
+        for epoch in range(num_epochs - 1, num_epochs - 14, -1):
             self.evaluate_epoch(epoch)
         print("\n-> Done!")
 

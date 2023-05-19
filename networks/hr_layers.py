@@ -515,7 +515,7 @@ class Attention_Module(nn.Module):
         return self.relu(self.conv_se(features))
 
 class fSEModule(nn.Module):
-    def __init__(self, high_feature_channel, low_feature_channels, output_channel=None, use_super_res=True, use_ca=False):
+    def __init__(self, high_feature_channel, low_feature_channels, output_channel=None, use_super_res=True, use_ca=True):
         super().__init__()
         in_channel = high_feature_channel + low_feature_channels
         out_channel = high_feature_channel

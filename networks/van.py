@@ -292,20 +292,20 @@ class SuperResBlock(nn.Module):
         self.num_ch = num_ch
         self.use_lka = use_lka
         if use_lka:
-            self.norm = nn.BatchNorm2d(num_ch)
+            self.norm = nn.Identity() #nn.BatchNorm2d(num_ch)
             self.conv_0 = nn.Conv2d(num_ch, num_ch, 1)
             self.lka = AttentionModule(num_ch)
         self.conv_1 = nn.Conv2d(num_ch, num_ch * 4, 5, stride=1, padding=2, padding_mode='reflect', groups=num_ch)
         self.nonlin = nn.GELU()
         self.conv_2 = nn.Conv2d(num_ch * 4, num_ch * 4, 5, stride=1, padding=2, padding_mode='reflect', groups=num_ch * 4)
         self.pixel_shuffle = nn.PixelShuffle(2)
-        self.conv_head = nn.Conv2d(num_ch, num_ch, 7, stride=1, padding=3, padding_mode='reflect', groups=num_ch)
+        #self.conv_head = nn.Conv2d(num_ch, num_ch, 7, stride=1, padding=3, padding_mode='reflect', groups=num_ch)
 
     def forward(self, x):
         x_out = self.lka(self.nonlin(self.conv_0(self.norm(x)))) + x if self.use_lka else x
         x_out = self.nonlin(self.conv_1(x_out))
         x_out = self.conv_2(x_out)
         x_out = self.pixel_shuffle(x_out)
-        x_out = self.conv_head(x_out)
+        #x_out = self.conv_head(x_out)
         # x_out = x_out + nn.functional.interpolate(x, scale_factor=2, mode="nearest")
         return x_out
