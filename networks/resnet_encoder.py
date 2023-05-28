@@ -18,6 +18,7 @@ from mmcv.cnn.utils import revert_sync_batchnorm
 
 from .hr_layers import ConvBlock, upsample
 from .van import VAN, ZeroVANlayer
+from .pvtv2 import PVT_Stage
 
 class ResNetMultiImageInput(models.ResNet):
     """Constructs a resnet model with varying number of input images.
@@ -141,35 +142,37 @@ class MultiHeadAttentionBlock(nn.Module):
 
 class VAN_encoder(nn.Module):
     def __init__(self, zero_layer_mlp_ratio=4, zero_layer_depths=3, pretrained=True,
-                 path_to_weights='networks/van_base_828.pth.tar'):
+                 path_to_weights=('networks/pvt_v2_b1.pth', 'networks/van_base_828.pth.tar')):
         super().__init__()
         self.register_buffer('imagenet_mean', torch.Tensor([0.485, 0.456, 0.406]))
         self.register_buffer('imagenet_std', torch.Tensor([0.229, 0.224, 0.225]))
         self.num_ch_enc = np.array([64, 64, 128, 320, 512])
-        # self.conv_stem = nn.Sequential(
-        #     nn.Conv2d(3, 64, kernel_size=(3, 3), stride=2, padding=1),
-        #     nn.BatchNorm2d(64),
-        #     nn.Conv2d(64, 64, kernel_size=(3, 3), padding=1)
-        # )
+
+        pvt = PVT_Stage(
+                        weights_path=path_to_weights[0],
+                        pretrained=pretrained
+                        )
         van = VAN(embed_dims=[64, 128, 320, 512],  mlp_ratios=[8, 8, 4, 4],
                   # depths=[3, 3, 12, 3],
                   depths=[2, 2, 4, 2]
                   )
-        self.zero_layer = ZeroVANlayer(mlp_ratio=zero_layer_mlp_ratio, depths=zero_layer_depths)
         if pretrained:
-            van = load_weights(van, path_to_weights)
+            van = load_weights(van, path_to_weights[1])
+        # self.zero_layer = ZeroVANlayer(mlp_ratio=zero_layer_mlp_ratio, depths=zero_layer_depths)
+        self.zero_layer = pvt
         self.van = van
         # self.mha_block = MultiHeadAttentionBlock(self.num_ch_enc[-1], 6, 20, nhead=8)
 
     def forward(self, x):
         x = (x - self.imagenet_mean[None, :, None, None]) / self.imagenet_std[None, :, None, None]
         # out = [self.conv_stem(x)]
-        out = [self.zero_layer(x)]
+        # out = [self.zero_layer(x)]
+        out = [self.zero_layer(upsample(x))]
         van_out = self.van(x)
         out.extend(van_out)
-        high_fused = self.zero_layer.fusion_conv_high(torch.cat([out[0], upsample(out[1])], dim=1))
-        low_fused = self.zero_layer.fusion_conv_low(
-            torch.cat([self.zero_layer.downsample_conv(self.zero_layer.downsample_norm(out[0])), out[1]], dim=1))
-        out[0], out[1] = high_fused, low_fused
+        # high_fused = self.zero_layer.fusion_conv_high(torch.cat([out[0], upsample(out[1])], dim=1))
+        # low_fused = self.zero_layer.fusion_conv_low(
+        #     torch.cat([self.zero_layer.downsample_conv(self.zero_layer.downsample_norm(out[0])), out[1]], dim=1))
+        # out[0], out[1] = high_fused, low_fused
         # out[-1] += self.mha_block(out[-1])
         return out
