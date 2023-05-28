@@ -155,7 +155,7 @@ def edge_detector_canny(img_tensor, thr_1=500, thr_2=150):
 
 
 class ZeroVANlayer(nn.Module):
-    def __init__(self, mlp_ratio=4, depths=3, use_edge_detector=True):
+    def __init__(self, mlp_ratio=4, depths=3, use_edge_detector=False):
         super().__init__()
         in_channels = 6 if use_edge_detector else 3
         self.use_edge_detector = use_edge_detector
@@ -170,10 +170,16 @@ class ZeroVANlayer(nn.Module):
         self.downsample_conv = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, padding_mode='reflect', groups=1)
         self.downsample_norm = nn.BatchNorm2d(64) #
 
+        # self.conv_stem = nn.Sequential(
+        #     nn.Conv2d(3, 64, kernel_size=(3, 3), stride=2, padding=1),
+        #     nn.BatchNorm2d(64),
+        #     nn.ReLU(),
+        #     nn.Conv2d(64, 64, kernel_size=(3, 3), padding=1)
+        # )
+
     def forward(self, x):
+        # x = self.conv_stem(x)
         B = x.shape[0]
-        if self.use_edge_detector:
-            x = torch.cat([edge_detector_canny(x[i]).unsqueeze(0) for i in range(B)], dim=0)
         x, H, W = self.patch_embed(x)
         for blk in self.block:
             x = blk(x, H, W)
@@ -314,20 +320,20 @@ class SuperResBlock(nn.Module):
         self.num_ch = num_ch
         self.use_lka = use_lka
         if use_lka:
-            self.norm = nn.BatchNorm2d(num_ch)
+            self.norm = nn.Identity() #nn.BatchNorm2d(num_ch)
             self.conv_0 = nn.Conv2d(num_ch, num_ch, 1)
             self.lka = AttentionModule(num_ch)
         self.conv_1 = nn.Conv2d(num_ch, num_ch * 4, 5, stride=1, padding=2, padding_mode='reflect', groups=num_ch)
         self.nonlin = nn.GELU()
         self.conv_2 = nn.Conv2d(num_ch * 4, num_ch * 4, 5, stride=1, padding=2, padding_mode='reflect', groups=num_ch * 4)
         self.pixel_shuffle = nn.PixelShuffle(2)
-        self.conv_head = nn.Conv2d(num_ch, num_ch, 7, stride=1, padding=3, padding_mode='reflect', groups=num_ch)
+        #self.conv_head = nn.Conv2d(num_ch, num_ch, 7, stride=1, padding=3, padding_mode='reflect', groups=num_ch)
 
     def forward(self, x):
         x_out = self.lka(self.nonlin(self.conv_0(self.norm(x)))) + x if self.use_lka else x
         x_out = self.nonlin(self.conv_1(x_out))
         x_out = self.conv_2(x_out)
         x_out = self.pixel_shuffle(x_out)
-        x_out = self.conv_head(x_out)
+        # x_out = self.conv_head(x_out)
         # x_out = x_out + nn.functional.interpolate(x, scale_factor=2, mode="nearest")
         return x_out

@@ -12,7 +12,7 @@ import torch.nn as nn
 
 from collections import OrderedDict
 from .van import VAN, Block, VAN_Block, SuperResBlock
-from .hr_layers import ConvBlock, ConvBlockSELU, fSEModule, Conv3x3, Conv1x1, upsample, VanFusionBlock
+from .hr_layers import ConvBlock, ConvBlockSELU, fSEModule, Conv3x3, Conv1x1, upsample, ConvBlockClassic, VanFusionBlock
 from .hr_layers_diffnet import Attention_Module
 
 class DepthDecoder(nn.Module):
@@ -33,14 +33,14 @@ class DepthDecoder(nn.Module):
             # upconv_0
             num_ch_in = self.num_ch_enc[-1] if i == 4 else self.num_ch_dec[i + 1]
             num_ch_out = self.num_ch_dec[i]
-            self.convs[("upconv", i, 0)] = ConvBlock(num_ch_in, num_ch_out)
+            self.convs[("upconv", i, 0)] = ConvBlockClassic(num_ch_in, num_ch_out)
 
             # upconv_1
             num_ch_in = self.num_ch_dec[i]
             if self.use_skips and i > 0:
                 num_ch_in += self.num_ch_enc[i - 1]
             num_ch_out = self.num_ch_dec[i]
-            self.convs[("upconv", i, 1)] = ConvBlock(num_ch_in, num_ch_out)
+            self.convs[("upconv", i, 1)] = ConvBlockClassic(num_ch_in, num_ch_out)
 
         for s in self.scales:
             self.convs[("dispconv", s)] = Conv3x3(self.num_ch_dec[s], self.num_output_channels)
