@@ -141,25 +141,27 @@ class MultiHeadAttentionBlock(nn.Module):
 
 
 class VAN_encoder(nn.Module):
-    def __init__(self, img_size, zero_layer_mlp_ratio=4, zero_layer_depths=3, pretrained=True,
-                 path_to_weights=('networks/pvt_v2_b1.pth', 'networks/van_base_828.pth.tar')):
+    def __init__(self, img_size=None, zero_layer_mlp_ratio=8, zero_layer_depths=2, pretrained=True,
+                 path_to_weights=('networks/pvt_v2_b1.pth', 'networks/van_small_811.pth.tar')):
         super().__init__()
         self.register_buffer('imagenet_mean', torch.Tensor([0.485, 0.456, 0.406]))
         self.register_buffer('imagenet_std', torch.Tensor([0.229, 0.224, 0.225]))
         self.num_ch_enc = np.array([64, 64, 128, 320, 512])
 
-        pvt = PVT_Stage(img_size=np.array(img_size),
-                        weights_path=path_to_weights[0],
-                        pretrained=pretrained
-                        )
+        self.zero_layer = ZeroVANlayer(path_to_weights[0], mlp_ratio=zero_layer_mlp_ratio,
+                                       depths=zero_layer_depths, pretrained=pretrained)
+        # pvt = PVT_Stage(img_size=np.array(img_size),
+        #                 weights_path=path_to_weights[0],
+        #                 pretrained=pretrained
+        #                 )
         van = VAN(embed_dims=[64, 128, 320, 512],  mlp_ratios=[8, 8, 4, 4],
                   # depths=[3, 3, 12, 3],
                   depths=[2, 2, 4, 2]
                   )
         if pretrained:
             van = load_weights(van, path_to_weights[1])
-        # self.zero_layer = ZeroVANlayer(mlp_ratio=zero_layer_mlp_ratio, depths=zero_layer_depths)
-        self.zero_layer = pvt
+
+        # self.zero_layer = pvt
         self.van = van
         # self.mha_block = MultiHeadAttentionBlock(self.num_ch_enc[-1], 6, 20, nhead=8)
 

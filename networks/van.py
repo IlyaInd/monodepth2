@@ -155,20 +155,23 @@ def edge_detector_canny(img_tensor, thr_1=500, thr_2=150):
 
 
 class ZeroVANlayer(nn.Module):
-    def __init__(self, mlp_ratio=4, depths=3, use_edge_detector=False):
+    def __init__(self, weights_path, mlp_ratio=8, depths=2, pretrained=False, use_edge_detector=False):
         super().__init__()
         in_channels = 6 if use_edge_detector else 3
         self.use_edge_detector = use_edge_detector
-        patch_embed = OverlapPatchEmbed(patch_size=7, stride=2, in_chans=in_channels, embed_dim=64)
-        self.patch_embed = revert_sync_batchnorm(patch_embed)
-        self.block = nn.ModuleList([Block(dim=64, mlp_ratio=mlp_ratio, drop=0, drop_path=0,
+        patch_embed = OverlapPatchEmbed(patch_size=7, stride=4, in_chans=in_channels, embed_dim=64)
+        self.patch_embed1 = revert_sync_batchnorm(patch_embed)
+        self.block1 = nn.ModuleList([Block(dim=64, mlp_ratio=mlp_ratio, drop=0, drop_path=0,
                                           linear=False, norm_cfg=dict(type='BN', requires_grad=True))
                                     for j in range(depths)])
-        self.norm = nn.LayerNorm(64)
+        self.norm1 = nn.LayerNorm(64)
         self.fusion_conv_high = nn.Conv2d(128, 64, kernel_size=1)  # ConvBlock(128, 64, convnext=True)
         self.fusion_conv_low = nn.Conv2d(128, 64, kernel_size=1)  # ConvBlock(128, 64, convnext=True)
         self.downsample_conv = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, padding_mode='reflect', groups=1)
-        self.downsample_norm = nn.BatchNorm2d(64) #
+        self.downsample_norm = nn.BatchNorm2d(64)
+
+        if pretrained:
+            self.load_weights(weights_path)
 
         # self.conv_stem = nn.Sequential(
         #     nn.Conv2d(3, 64, kernel_size=(3, 3), stride=2, padding=1),
@@ -177,13 +180,21 @@ class ZeroVANlayer(nn.Module):
         #     nn.Conv2d(64, 64, kernel_size=(3, 3), padding=1)
         # )
 
+    def load_weights(self, weights_path, strict=False):
+        # self.default_cfg = _cfg()
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        checkpoint = torch.load(weights_path, map_location=torch.device(device))
+        self.load_state_dict(checkpoint["state_dict"], strict=strict)
+        del checkpoint
+        return self
+
     def forward(self, x):
         # x = self.conv_stem(x)
         B = x.shape[0]
-        x, H, W = self.patch_embed(x)
-        for blk in self.block:
+        x, H, W = self.patch_embed1(x)
+        for blk in self.block1:
             x = blk(x, H, W)
-        x = self.norm(x)
+        x = self.norm1(x)
         x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
         return x
 

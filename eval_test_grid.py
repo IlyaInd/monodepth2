@@ -72,7 +72,7 @@ class Tester:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
             # encoder = networks.ResnetEncoder(opt.num_layers, False)
-            encoder = networks.resnet_encoder.VAN_encoder(zero_layer_mlp_ratio=4, zero_layer_depths=2,  pretrained=False)
+            encoder = networks.resnet_encoder.VAN_encoder(zero_layer_mlp_ratio=8, zero_layer_depths=2,  pretrained=False)
             # depth_decoder = networks.DepthDecoder(encoder.num_ch_enc)
             depth_decoder = networks.depth_decoder.HRDepthDecoder(num_ch_enc=[64, 64, 128, 320, 512], use_super_res=True, convnext=False)
             # depth_decoder = networks.depth_decoder.VAN_decoder(mlp_ratios=(4, 4, 4, 4), depths=(2, 2, 3, 2))
