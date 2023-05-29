@@ -919,13 +919,14 @@ class PVT_Stage(nn.Module):
                  num_heads=1,
                  depth=2,
                  mlp_ratios=8,
-                 drop_rate=0., attn_drop_rate=0., drop_path_rate=0.,
                  qkv_bias=True, qk_scale=None,
                  norm_layer=nn.LayerNorm,
                  sr_ratio=8,
                  linear=False,
                  pretrained=True,
-                 weights_path=None):
+                 weights_path=None,
+                 drop_rate=0., attn_drop_rate=0., drop_path_rate=0.,
+                 ):
         super().__init__()
         self.in_chans = in_chans
         self.depth = depth
@@ -942,6 +943,10 @@ class PVT_Stage(nn.Module):
                                               drop=0, attn_drop=0, drop_path=0, norm_layer=norm_layer
                                               ) for _ in range(depth)])
         self.norm1 = norm_layer(embed_dim)
+        self.fusion_conv_high = nn.Conv2d(128, 64, kernel_size=1)  # ConvBlock(128, 64, convnext=True)
+        self.fusion_conv_low = nn.Conv2d(128, 64, kernel_size=1)  # ConvBlock(128, 64, convnext=True)
+        self.downsample_conv = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, padding_mode='reflect', groups=1)
+        self.downsample_norm = nn.BatchNorm2d(64)
         if pretrained:
             self.load_weights(weights_path)
 

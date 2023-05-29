@@ -141,14 +141,14 @@ class MultiHeadAttentionBlock(nn.Module):
 
 
 class VAN_encoder(nn.Module):
-    def __init__(self, zero_layer_mlp_ratio=4, zero_layer_depths=3, pretrained=True,
+    def __init__(self, img_size, zero_layer_mlp_ratio=4, zero_layer_depths=3, pretrained=True,
                  path_to_weights=('networks/pvt_v2_b1.pth', 'networks/van_base_828.pth.tar')):
         super().__init__()
         self.register_buffer('imagenet_mean', torch.Tensor([0.485, 0.456, 0.406]))
         self.register_buffer('imagenet_std', torch.Tensor([0.229, 0.224, 0.225]))
         self.num_ch_enc = np.array([64, 64, 128, 320, 512])
 
-        pvt = PVT_Stage(
+        pvt = PVT_Stage(img_size=np.array(img_size),
                         weights_path=path_to_weights[0],
                         pretrained=pretrained
                         )
@@ -170,9 +170,9 @@ class VAN_encoder(nn.Module):
         out = [self.zero_layer(upsample(x))]
         van_out = self.van(x)
         out.extend(van_out)
-        # high_fused = self.zero_layer.fusion_conv_high(torch.cat([out[0], upsample(out[1])], dim=1))
-        # low_fused = self.zero_layer.fusion_conv_low(
-        #     torch.cat([self.zero_layer.downsample_conv(self.zero_layer.downsample_norm(out[0])), out[1]], dim=1))
-        # out[0], out[1] = high_fused, low_fused
+        high_fused = self.zero_layer.fusion_conv_high(torch.cat([out[0], upsample(out[1])], dim=1))
+        low_fused = self.zero_layer.fusion_conv_low(
+            torch.cat([self.zero_layer.downsample_conv(self.zero_layer.downsample_norm(out[0])), out[1]], dim=1))
+        out[0], out[1] = high_fused, low_fused
         # out[-1] += self.mha_block(out[-1])
         return out
