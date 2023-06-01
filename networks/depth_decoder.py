@@ -12,7 +12,7 @@ import torch.nn as nn
 
 from collections import OrderedDict
 from .van import VAN, Block, VAN_Block, SuperResBlock
-from .hr_layers import ConvBlock, ConvBlockSELU, fSEModule, Conv3x3, Conv1x1, upsample, ConvBlockClassic, VanFusionBlock
+from .hr_layers import ConvBlock, fSEModule, Conv3x3, Conv1x1, upsample, ConvBlockClassic, DisparityHead, VanFusionBlock
 from .hr_layers_diffnet import Attention_Module
 
 class DepthDecoder(nn.Module):
@@ -131,10 +131,11 @@ class HRDepthDecoder(nn.Module):
 
         for i in range(4):
             # self.convs["dispConvScale{}".format(i)] = Conv3x3(self.num_ch_dec[i], self.num_output_channels)
-            self.convs["dispConvScale{}".format(i)] = ConvBlock(self.num_ch_dec[i], self.num_output_channels, convnext=True)
+            # self.convs["dispConvScale{}".format(i)] = ConvBlock(self.num_ch_dec[i], self.num_output_channels, convnext=True)
+            self.convs["dispConvScale{}".format(i)] = DisparityHead(self.num_ch_dec[i], n_bins=64)
 
         # self.decoder = nn.ModuleList(list(self.convs.values()))
-        self.sigmoid = nn.Sigmoid()
+        self.sigmoid = nn.Identity()  # nn.Sigmoid()
 
     def nestConv(self, conv, high_feature, low_features):
         conv_0 = conv[0]

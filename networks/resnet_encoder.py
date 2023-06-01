@@ -142,14 +142,14 @@ class MultiHeadAttentionBlock(nn.Module):
 
 class VAN_encoder(nn.Module):
     def __init__(self, img_size=None, zero_layer_mlp_ratio=8, zero_layer_depths=2, pretrained=True,
-                 path_to_weights=('networks/pvt_v2_b1.pth', 'networks/van_small_811.pth.tar')):
+                 pretrained_zl=False, path_to_weights=('networks/pvt_v2_b1.pth', 'networks/van_small_811.pth.tar')):
         super().__init__()
         self.register_buffer('imagenet_mean', torch.Tensor([0.485, 0.456, 0.406]))
         self.register_buffer('imagenet_std', torch.Tensor([0.229, 0.224, 0.225]))
         self.num_ch_enc = np.array([64, 64, 128, 320, 512])
 
         self.zero_layer = ZeroVANlayer(path_to_weights[0], mlp_ratio=zero_layer_mlp_ratio,
-                                       depths=zero_layer_depths, pretrained=pretrained)
+                                       depths=zero_layer_depths, pretrained=pretrained_zl)
         # pvt = PVT_Stage(img_size=np.array(img_size),
         #                 weights_path=path_to_weights[0],
         #                 pretrained=pretrained
@@ -168,13 +168,13 @@ class VAN_encoder(nn.Module):
     def forward(self, x):
         x = (x - self.imagenet_mean[None, :, None, None]) / self.imagenet_std[None, :, None, None]
         # out = [self.conv_stem(x)]
-        # out = [self.zero_layer(x)]
-        out = [self.zero_layer(upsample(x))]
+        out = [self.zero_layer(x)]
+        # out = [self.zero_layer(upsample(x))]
         van_out = self.van(x)
         out.extend(van_out)
-        high_fused = self.zero_layer.fusion_conv_high(torch.cat([out[0], upsample(out[1])], dim=1))
-        low_fused = self.zero_layer.fusion_conv_low(
-            torch.cat([self.zero_layer.downsample_conv(self.zero_layer.downsample_norm(out[0])), out[1]], dim=1))
-        out[0], out[1] = high_fused, low_fused
+        # high_fused = self.zero_layer.fusion_conv_high(torch.cat([out[0], upsample(out[1])], dim=1))
+        # low_fused = self.zero_layer.fusion_conv_low(
+        #     torch.cat([self.zero_layer.downsample_conv(self.zero_layer.downsample_norm(out[0])), out[1]], dim=1))
+        # out[0], out[1] = high_fused, low_fused
         # out[-1] += self.mha_block(out[-1])
         return out

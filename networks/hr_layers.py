@@ -161,12 +161,6 @@ class ConvBlockClassic(nn.Module):
         return out
 
 
-class ConvBlockSELU(ConvBlockClassic):
-    def __init__(self, in_channels, out_channels):
-        super().__init__(in_channels, out_channels)
-        self.nonlin = nn.SELU(inplace=True)
-
-
 class ConvNeXtBlock(nn.Module):
     def __init__(self, dim, out_dim, layer_scale_init_value=1e-6):
         super().__init__()
@@ -555,10 +549,28 @@ class fSEModule(nn.Module):
             features = features * y.expand_as(features)
             features = self.relu(self.conv_se(features))
         else:
-            # features = self.lka_conv_2(self.lka(self.lka_activation(self.lka_conv_1(features)))) + features
             features = self.lka(self.lka_activation(self.lka_conv_1(self.norm(features)))) + features
             features = self.lka_conv_2(features)
         return features
+
+
+class DisparityHead(nn.Module):
+    def __init__(self, channels, n_bins=64, mode='plane-resid'):
+        super().__init__()
+        self.channels = channels
+        assert mode in ('adabins-fix', 'plane-resid')
+        max_distance = 1
+
+        self.register_buffer('bin_centers', torch.Tensor(np.linspace(0, max_distance, n_bins)))
+        self.convnext = ConvBlock(channels, channels, convnext=True)
+        self.cls_pixel = nn.Conv2d(channels, n_bins, 3, 1, 1)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x):
+        x = self.convnext(x)
+        weights = self.softmax(self.cls_pixel(x))  # [B, cls_weights, H, W]
+        x = self.bin_centers[None, :, None, None] * weights
+        return x.sum(dim=1, keepdim=True)
 
 
 class VanFusionBlock(nn.Module):

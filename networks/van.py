@@ -159,16 +159,16 @@ class ZeroVANlayer(nn.Module):
         super().__init__()
         in_channels = 6 if use_edge_detector else 3
         self.use_edge_detector = use_edge_detector
-        patch_embed = OverlapPatchEmbed(patch_size=7, stride=4, in_chans=in_channels, embed_dim=64)
-        self.patch_embed1 = revert_sync_batchnorm(patch_embed)
+        patch_embed = OverlapPatchEmbed(patch_size=7, stride=2, in_chans=in_channels, embed_dim=64)
+        self.patch_embed = revert_sync_batchnorm(patch_embed)
         self.block1 = nn.ModuleList([Block(dim=64, mlp_ratio=mlp_ratio, drop=0, drop_path=0,
                                           linear=False, norm_cfg=dict(type='BN', requires_grad=True))
                                     for j in range(depths)])
         self.norm1 = nn.LayerNorm(64)
-        self.fusion_conv_high = nn.Conv2d(128, 64, kernel_size=1)  # ConvBlock(128, 64, convnext=True)
-        self.fusion_conv_low = nn.Conv2d(128, 64, kernel_size=1)  # ConvBlock(128, 64, convnext=True)
-        self.downsample_conv = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, padding_mode='reflect', groups=1)
-        self.downsample_norm = nn.BatchNorm2d(64)
+        # self.fusion_conv_high = nn.Conv2d(128, 64, kernel_size=1)  # ConvBlock(128, 64, convnext=True)
+        # self.fusion_conv_low = nn.Conv2d(128, 64, kernel_size=1)  # ConvBlock(128, 64, convnext=True)
+        # self.downsample_conv = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, padding_mode='reflect', groups=1)
+        # self.downsample_norm = nn.BatchNorm2d(64)
 
         if pretrained:
             self.load_weights(weights_path)
@@ -191,7 +191,7 @@ class ZeroVANlayer(nn.Module):
     def forward(self, x):
         # x = self.conv_stem(x)
         B = x.shape[0]
-        x, H, W = self.patch_embed1(x)
+        x, H, W = self.patch_embed(x)
         for blk in self.block1:
             x = blk(x, H, W)
         x = self.norm1(x)
@@ -345,6 +345,6 @@ class SuperResBlock(nn.Module):
         x_out = self.nonlin(self.conv_1(x_out))
         x_out = self.conv_2(x_out)
         x_out = self.pixel_shuffle(x_out)
-        # x_out = self.conv_head(x_out)
+        #x_out = self.conv_head(x_out)
         # x_out = x_out + nn.functional.interpolate(x, scale_factor=2, mode="nearest")
         return x_out
