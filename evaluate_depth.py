@@ -86,10 +86,12 @@ def evaluate(opt):
 
         img_ext = '.png' if opts.png else '.jpg'
 
+        height, width = encoder_dict['height'], encoder_dict['width']
+        #height, width = 320, 1024
         dataset = datasets.KITTIRAWDataset(opt.data_path, filenames,
-                                           encoder_dict['height'], encoder_dict['width'],
+                                           height, width,
                                            [0], 4, is_train=False, img_ext=img_ext)
-        dataloader = DataLoader(dataset, 64, shuffle=False, num_workers=opt.num_workers,
+        dataloader = DataLoader(dataset, 16, shuffle=False, num_workers=opt.num_workers,
                                 pin_memory=True, drop_last=False)
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -112,8 +114,9 @@ def evaluate(opt):
         pred_disps = []
 
         print("-> Computing predictions with size {}x{}".format(
-            encoder_dict['width'], encoder_dict['height']))
+            width, height))
 
+        total_time = 0
         with torch.no_grad():
             for data in dataloader:
                 input_color = data[("color", 0, 0)].to(device)
@@ -122,7 +125,14 @@ def evaluate(opt):
                     # Post-processed results require each image to have two forward passes
                     input_color = torch.cat((input_color, torch.flip(input_color, [3])), 0)
 
+                starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+                starter.record()
                 output = depth_decoder(encoder(input_color))
+                ender.record()
+                torch.cuda.synchronize()
+                curr_time = starter.elapsed_time(ender) / 1000
+                total_time += curr_time
+                #print(elapsed_time)
 
                 pred_disp, _ = disp_to_depth(output[("disp", 0)], opt.min_depth, opt.max_depth)
                 pred_disp = pred_disp.cpu()[:, 0].numpy()
@@ -244,6 +254,7 @@ def evaluate(opt):
 
     print("\n  " + ("{:>8} | " * 7).format("abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"))
     print(("&{: 8.3f}  " * 7).format(*mean_errors.tolist()) + "\\\\")
+    print(f"\n-> Avg FPS = {round(dataset.__len__() / total_time, 1)}")
     print("\n-> Done!")
 
 

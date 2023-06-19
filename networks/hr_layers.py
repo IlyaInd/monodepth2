@@ -526,6 +526,11 @@ class fSEModule(nn.Module):
         self.use_channel_attention = use_ca
         if use_ca:
             reduction = 16
+            self.lka = LKA(channel)
+            self.lka_conv_1 = nn.Conv2d(channel, channel, 1)
+            self.lka_conv_2 = nn.Conv2d(channel, channel, 1)
+            self.lka_activation = nn.Mish()
+
             self.avg_pool = nn.AdaptiveAvgPool2d(1)
             self.fc = nn.Sequential(
                 nn.Linear(channel, channel // reduction, bias=False),
@@ -534,13 +539,13 @@ class fSEModule(nn.Module):
             )
             self.sigmoid = nn.Sigmoid()
             self.conv_se = nn.Conv2d(in_channels=in_channel, out_channels=out_channel, kernel_size=1, stride=1)
-            self.relu = nn.ReLU(inplace=True)
+            self.relu = nn.Mish()
         else:
             self.norm = nn.BatchNorm2d(channel)
             self.lka = LKA(channel)
             self.lka_conv_1 = nn.Conv2d(channel, channel, 1)
             self.lka_conv_2 = nn.Conv2d(channel, out_channel, 1)
-            self.lka_activation = nn.GELU()  # nn.Mish()
+            self.lka_activation = nn.Mish()
 
     def forward(self, high_features, low_features):
         features = [self.upscaler(high_features)]
@@ -549,6 +554,7 @@ class fSEModule(nn.Module):
 
         if self.use_channel_attention:
             b, c, _, _ = features.size()
+            features = self.lka_conv_2(self.lka(self.lka_activation(self.lka_conv_1(features)))) + features
             y = self.avg_pool(features).view(b, c)
             y = self.fc(y).view(b, c, 1, 1)
             y = self.sigmoid(y)

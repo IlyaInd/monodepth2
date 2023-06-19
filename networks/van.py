@@ -296,7 +296,7 @@ class SuperResBlock(nn.Module):
             self.conv_0 = nn.Conv2d(num_ch, num_ch, 1)
             self.lka = AttentionModule(num_ch)
         self.conv_1 = nn.Conv2d(num_ch, num_ch * 4, 5, stride=1, padding=2, padding_mode='reflect', groups=num_ch)
-        self.nonlin = nn.GELU()
+        self.nonlin = nn.Mish()
         self.conv_2 = nn.Conv2d(num_ch * 4, num_ch * 4, 5, stride=1, padding=2, padding_mode='reflect', groups=num_ch * 4)
         self.pixel_shuffle = nn.PixelShuffle(2)
         #self.conv_head = nn.Conv2d(num_ch, num_ch, 7, stride=1, padding=3, padding_mode='reflect', groups=num_ch)

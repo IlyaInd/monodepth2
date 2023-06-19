@@ -66,7 +66,7 @@ class Tester:
             dataset = datasets.KITTIRAWDataset(opt.data_path, filenames,
                                                encoder_dict['height'], encoder_dict['width'],
                                                [0], 4, is_train=False, img_ext=img_ext)
-            dataloader = DataLoader(dataset, 64, shuffle=False, num_workers=opt.num_workers,
+            dataloader = DataLoader(dataset, 32, shuffle=False, num_workers=opt.num_workers,
                                     pin_memory=True, drop_last=False)
 
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
