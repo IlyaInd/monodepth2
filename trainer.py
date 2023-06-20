@@ -11,7 +11,6 @@ from collections import OrderedDict
 
 import torch.optim as optim
 from torch.utils.data import DataLoader
-# from tensorboardX import SummaryWriter
 import wandb
 
 import json
@@ -61,12 +60,10 @@ class Trainer:
         self.parameters_to_train.append({'params': self.models["encoder"].van.parameters(),
                                          'lr': self.opt.learning_rate * self.lr_multipliers['van']})
         self.parameters_to_train.append({'params': self.models["encoder"].zero_layer.parameters(),
-                                                   # list(self.models["encoder"].mha_block.parameters()),
                                          'lr': self.opt.learning_rate * self.lr_multipliers['zero_layer']})
 
         self.models["depth"] = networks.depth_decoder.HRDepthDecoder(num_ch_enc=[64, 64, 128, 320, 512],
                                                                      use_super_res=True, convnext=False)
-        # self.models["depth"] = networks.depth_decoder.VAN_decoder(mlp_ratios=(4, 4, 4, 4), depths=(2, 2, 3, 2))
         self.models["depth"].to(self.device)
         self.parameters_to_train.append({'params': self.models["depth"].parameters(),
                                          'lr': self.opt.learning_rate * self.lr_multipliers['depth']})
@@ -162,7 +159,7 @@ class Trainer:
             self.opt.frame_ids, 4, is_train=True, img_ext=img_ext)
 
         self.accumulation_steps = self.opt.grad_accumulation_steps
-        self.val_batch_size_ratio = 12
+        self.val_batch_size_ratio = 12  # to smooth validation loss and metrics curves
         self.train_loader = DataLoader(
             train_dataset, self.opt.batch_size, True,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
@@ -240,8 +237,6 @@ class Trainer:
     def run_epoch(self):
         """Run a single epoch of training and validation
         """
-        # self.model_lr_scheduler.step()
-
         print("Training")
         self.set_train()
 
@@ -264,7 +259,7 @@ class Trainer:
 
             duration = time.time() - before_op_time
 
-            # log less frequently after the first 2000 steps to save time & disk space
+            # log less frequently after the first 10% of training steps
             early_phase = self.step % self.opt.log_frequency == 0 and self.step <= self.num_total_steps // 10
             late_phase = self.step % (self.opt.log_frequency * 5) == 0 and self.step > self.num_total_steps // 10
 
@@ -284,9 +279,7 @@ class Trainer:
                 wandb.log({'grad_norm/' + k: self.track_grad_norm(self.models[k]) for k in self.models.keys()},
                       step=self.step)
             wandb.log({'grad_norm/van': self.track_grad_norm(self.models['encoder'].van),
-                       'grad_norm/zero_layer': self.track_grad_norm(self.models['encoder'].zero_layer),
-                       # 'grad_norm/mha_block': self.track_grad_norm(self.models['encoder'].mha_block)
-                       },
+                       'grad_norm/zero_layer': self.track_grad_norm(self.models['encoder'].zero_layer)},
                       step=self.step)
             if self.opt.scheduler == 'one_cycle' or self.opt.scheduler == 'cyclic':
                 self.model_lr_scheduler.step()
@@ -301,7 +294,7 @@ class Trainer:
     def process_batch(self, inputs):
         """Pass a minibatch through the network and generate images and losses
         """
-        #torch.cuda.reset_peak_memory_stats()
+        # torch.cuda.reset_peak_memory_stats()
         for key, ipt in inputs.items():
             inputs[key] = ipt.to(self.device)
 
@@ -330,7 +323,7 @@ class Trainer:
 
         self.generate_images_pred(inputs, outputs)
         losses = self.compute_losses(inputs, outputs)
-        #print(f"CUDA MAX_MEMORY_ALLOCATED = {round(torch.cuda.max_memory_allocated() / 1024 ** 3, 2)} GB")
+        # print(f"CUDA MAX_MEMORY_ALLOCATED = {round(torch.cuda.max_memory_allocated() / 1024 ** 3, 2)} GB")
 
         return outputs, losses
 

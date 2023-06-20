@@ -5,7 +5,6 @@ from timm.models.layers import DropPath
 from mmcv.cnn.utils.weight_init import (constant_init, normal_init,
                                         trunc_normal_init)
 from torch.nn.modules.utils import _pair as to_2tuple
-# from mmseg.models.builder import BACKBONES
 
 from mmcv.cnn import build_norm_layer
 from mmcv.runner import BaseModule
@@ -41,7 +40,7 @@ class Mlp(nn.Module):
 
 
 class AttentionModule(nn.Module):
-    """LKA - Large Kernel Attention"""
+    """Defines an LKA - Large Kernel Attention"""
     def __init__(self, dim):
         super().__init__()
         self.conv0 = nn.Conv2d(dim, dim, 5, padding=2, groups=dim)
@@ -77,7 +76,6 @@ class SpatialAttention(nn.Module):
 
 
 class Block(nn.Module):
-
     def __init__(self,
                  dim,
                  mlp_ratio=4.,
@@ -160,8 +158,11 @@ class ZeroVANlayer(nn.Module):
         return x
 
 
-# @BACKBONES.register_module()
 class VAN(BaseModule):
+    """
+    Code adopted from the paper Visual Attention Network:
+    https://github.com/Visual-Attention-Network/VAN-Segmentation/blob/main/van.py
+    """
     def __init__(self,
                  in_chans=3,
                  embed_dims=[64, 128, 256, 512],
@@ -299,13 +300,10 @@ class SuperResBlock(nn.Module):
         self.nonlin = nn.Mish()
         self.conv_2 = nn.Conv2d(num_ch * 4, num_ch * 4, 5, stride=1, padding=2, padding_mode='reflect', groups=num_ch * 4)
         self.pixel_shuffle = nn.PixelShuffle(2)
-        #self.conv_head = nn.Conv2d(num_ch, num_ch, 7, stride=1, padding=3, padding_mode='reflect', groups=num_ch)
 
     def forward(self, x):
         x_out = self.lka(self.nonlin(self.conv_0(self.norm(x)))) + x if self.use_lka else x
         x_out = self.nonlin(self.conv_1(x_out))
         x_out = self.conv_2(x_out)
         x_out = self.pixel_shuffle(x_out)
-        #x_out = self.conv_head(x_out)
-        # x_out = x_out + nn.functional.interpolate(x, scale_factor=2, mode="nearest")
         return x_out

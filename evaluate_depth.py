@@ -132,7 +132,6 @@ def evaluate(opt):
                 torch.cuda.synchronize()
                 curr_time = starter.elapsed_time(ender) / 1000
                 total_time += curr_time
-                #print(elapsed_time)
 
                 pred_disp, _ = disp_to_depth(output[("disp", 0)], opt.min_depth, opt.max_depth)
                 pred_disp = pred_disp.cpu()[:, 0].numpy()
@@ -241,11 +240,10 @@ def evaluate(opt):
 
     mean_errors = np.array(errors).mean(0)
 
-    # latest_run_id = list(filter(lambda x: x[-6:] == '.wandb', os.listdir('wandb/latest-run')))[0][4:-6]
-    latest_run_id = ''
-    print(f'Use latest wandb run to log summary: {latest_run_id}')
+    wandb_run_id = ''
+    print(f'Use latest wandb run to log summary: {wandb_run_id}')
     api = wandb.Api()
-    run = api.run(f"ilyaind/diploma/{latest_run_id}")
+    run = api.run(f"ilyaind/diploma/{wandb_run_id}")
     for k, v in zip(["abs_rel", "sq_rel", "rmse", "rmse_log", "a1", "a2", "a3"], mean_errors):
         run.summary[f'test/{k}'] = v
     run.summary.update()
@@ -261,6 +259,4 @@ def evaluate(opt):
 if __name__ == "__main__":
     options = MonodepthOptions()
     opts = options.parse()
-    opts.log_dir = 'logs'
-    opts.eval_mono = True
     evaluate(opts)

@@ -13,4 +13,4 @@ scipy==1.9.3
 Pillow==9.2.0
 mmcv==1.7.1
 timm==0.6.12
-wandb
+wandb==0.13.9

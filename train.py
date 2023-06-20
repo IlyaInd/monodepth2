@@ -14,7 +14,6 @@ from options import MonodepthOptions
 
 options = MonodepthOptions()
 opts = options.parse()
-opts.log_dir = 'logs'
 
 
 if __name__ == "__main__":
