@@ -139,21 +139,32 @@ class OverlapPatchEmbed(nn.Module):
 
 
 class ZeroVANlayer(nn.Module):
-    def __init__(self, mlp_ratio=4, depths=3):
+    def __init__(self, weights_path, mlp_ratio=8, depths=2, pretrained=False):
         super().__init__()
         patch_embed = OverlapPatchEmbed(patch_size=7, stride=2, in_chans=3, embed_dim=64)
         self.patch_embed = revert_sync_batchnorm(patch_embed)
-        self.block = nn.ModuleList([Block(dim=64, mlp_ratio=mlp_ratio, drop=0, drop_path=0,
+        self.block1 = nn.ModuleList([Block(dim=64, mlp_ratio=mlp_ratio, drop=0, drop_path=0,
                                           linear=False, norm_cfg=dict(type='BN', requires_grad=True))
                                     for j in range(depths)])
-        self.norm = nn.LayerNorm(64)
+        self.norm1 = nn.LayerNorm(64)
+
+        if pretrained:
+            self.load_weights(weights_path)
+
+    def load_weights(self, weights_path, strict=False):
+        # self.default_cfg = _cfg()
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        checkpoint = torch.load(weights_path, map_location=torch.device(device))
+        self.load_state_dict(checkpoint["state_dict"], strict=strict)
+        del checkpoint
+        return self
 
     def forward(self, x):
         B = x.shape[0]
         x, H, W = self.patch_embed(x)
-        for blk in self.block:
+        for blk in self.block1:
             x = blk(x, H, W)
-        x = self.norm(x)
+        x = self.norm1(x)
         x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
         return x
 

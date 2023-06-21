@@ -55,7 +55,16 @@ class Trainer:
 
         # self.models["encoder"] = networks.ResnetEncoder(
         #     self.opt.num_layers, self.opt.weights_init == "pretrained")
-        self.models["encoder"] = networks.resnet_encoder.VAN_encoder(4, 2, True, 'networks/van_small_811.pth.tar')
+        self.models["encoder"] = networks.resnet_encoder.VAN_encoder(img_size=[self.opt.height, self.opt.width],
+                                                                     zero_layer_mlp_ratio=4,
+                                                                     zero_layer_depths=2,
+                                                                     pretrained_zl=False,
+                                                                     pretrained=True,
+                                                                     path_to_weights=(
+                                                                                    # 'networks/pvt_v2_b1.pth',
+                                                                                    'networks/van_small_811.pth.tar',
+                                                                                    'networks/van_small_811.pth.tar')
+                                                                     )
         self.models["encoder"].to(self.device)
         self.parameters_to_train.append({'params': self.models["encoder"].van.parameters(),
                                          'lr': self.opt.learning_rate * self.lr_multipliers['van']})
