@@ -125,7 +125,7 @@ def load_weights(model, weights_path):
 
 class VAN_encoder(nn.Module):
     def __init__(self, img_size=None, zero_layer_mlp_ratio=8, zero_layer_depths=2, pretrained=True,
-                 pretrained_zl=False, path_to_weights=('networks/pvt_v2_b1.pth', 'networks/van_small_811.pth.tar')):
+                 pretrained_zl=False, path_to_weights=('ckpt/pvt_v2_b1.pth', 'ckpt/van_small_811.pth.tar')):
         super().__init__()
         self.register_buffer('imagenet_mean', torch.Tensor([0.485, 0.456, 0.406]))
         self.register_buffer('imagenet_std', torch.Tensor([0.229, 0.224, 0.225]))

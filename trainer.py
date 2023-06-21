@@ -62,8 +62,8 @@ class Trainer:
                                                                      pretrained=True,
                                                                      path_to_weights=(
                                                                                     # 'networks/pvt_v2_b1.pth',
-                                                                                    'networks/van_small_811.pth.tar',
-                                                                                    'networks/van_small_811.pth.tar')
+                                                                                    'ckpt/van_small_811.pth.tar',
+                                                                                    'ckpt/van_small_811.pth.tar')
                                                                      )
         self.models["encoder"].to(self.device)
         self.parameters_to_train.append({'params': self.models["encoder"].van.parameters(),
