@@ -14,7 +14,7 @@ This is the reference PyTorch implementation for training and testing depth esti
 [//]: # (  <img src="assets/teaser.gif" alt="qualitative comparison of results on KITTI benchmark" width="600" />)
 [//]: # (</p>)
 
-![alt text](assets/qualitative_circled.png)
+![qualitative_kitti](assets/qualitative_circled.png)
 
 [//]: # (![alt text]&#40;assets/qualitative-nyu.png&#41;)
 
@@ -30,6 +30,12 @@ pip install -r requirements.txt
 We ran our experiments with PyTorch 1.13.0, CUDA 11.7, Python 3.10 and CentOS 7.
 
 Note that our code is built based on [Monodepth2](https://github.com/nianticlabs/monodepth2).
+
+
+## 📊Results on KITTY
+
+<img alt="table_kitti" src="assets/results_table.png" width="700"/>
+
 
 
 ## 💾 KITTI training data
@@ -78,7 +84,7 @@ PLease download the ImageNet-1K pretrained [VAN](https://github.com/Visual-Atten
 
 **Monocular training:**
 ```shell
-wandb offline
+wandb disabled
 python train.py --model_name=model \
                 --batch_size=16 \
                 --num_epochs=21 \
