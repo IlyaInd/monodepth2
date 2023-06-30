@@ -143,10 +143,10 @@ class ZeroVANlayer(nn.Module):
         super().__init__()
         patch_embed = OverlapPatchEmbed(patch_size=7, stride=2, in_chans=3, embed_dim=64)
         self.patch_embed = revert_sync_batchnorm(patch_embed)
-        self.block1 = nn.ModuleList([Block(dim=64, mlp_ratio=mlp_ratio, drop=0, drop_path=0,
+        self.block = nn.ModuleList([Block(dim=64, mlp_ratio=mlp_ratio, drop=0, drop_path=0,
                                           linear=False, norm_cfg=dict(type='BN', requires_grad=True))
                                     for j in range(depths)])
-        self.norm1 = nn.LayerNorm(64)
+        self.norm = nn.LayerNorm(64)
 
         if pretrained:
             self.load_weights(weights_path)
@@ -162,9 +162,9 @@ class ZeroVANlayer(nn.Module):
     def forward(self, x):
         B = x.shape[0]
         x, H, W = self.patch_embed(x)
-        for blk in self.block1:
+        for blk in self.block:
             x = blk(x, H, W)
-        x = self.norm1(x)
+        x = self.norm(x)
         x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
         return x
 
